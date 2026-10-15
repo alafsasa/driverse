@@ -49,18 +49,25 @@ all passing with zero compiler warnings.
 
 ```
 driverse/
-├── CMakeLists.txt
+├── CMakeLists.txt          # top-level build; driverse_core lib + driverse app
 ├── src/
-│   ├── core/           # Filesystem scanning, analysis, recommendations
-│   ├── gui/            # Qt UI, models, views
-│   ├── platform/       # Linux-specific: mounts, package managers, trash
-│   ├── utils/          # Logging, config, helpers
-│   └── main.cpp
-├── tests/              # Unit & integration tests
-├── data/               # Resources, icons
-├── docs/               # Additional docs
-└── scripts/           # Build/test scripts
+│   ├── core/               # Scanner, analysis, recommendations (no Qt Widgets)
+│   │   ├── types.h/.cpp        # FileItem, DeviceInfo, ScanResult, enums
+│   │   ├── utils.h/.cpp        # formatting, path protection, fs classification
+│   │   ├── protections.h/.cpp  # protected/sensitive path registry
+│   │   └── scanner.h/.cpp      # thread-confined filesystem scanner
+│   ├── platform/           # Linux-specific: mounts, package managers, trash
+│   │   └── mounts.h/.cpp       # /proc mount discovery + statvfs capacity
+│   ├── gui/                # Qt UI, models, views            (Phase 8+)
+│   └── main.cpp            # Qt application entry point
+├── tests/                  # CTest suites (core/*)
+├── data/                   # Resources, icons                 (future)
+├── docs/                   # Additional docs                  (future)
+└── scripts/                # Build/test scripts
 ```
+
+> Configuration and logging helpers are currently in `src/core/utils.*`; they
+> will migrate into a dedicated `src/utils/` module in Phase 7 if they grow.
 
 ## Phase 0: Foundation & Environment Setup
 **Goal:** Set up build system, project structure, and development environment.  
@@ -68,26 +75,26 @@ driverse/
 **Status:** ✅ Complete
 
 ### Deliverables
-- [ ] CMakeLists.txt with Qt6 dependencies configured
-- [ ] Basic project directory structure
-- [ ] `.gitignore` appropriate for C++/Qt/CMake
-- [ ] Basic main.cpp with empty Qt app
-- [ ] Build compiles successfully
+- [x] CMakeLists.txt with Qt6 dependencies configured
+- [x] Basic project directory structure
+- [x] `.gitignore` appropriate for C++/Qt/CMake
+- [x] Basic main.cpp with empty Qt app
+- [x] Build compiles successfully
 
 ### Tasks
 1. **Create project skeleton**
-   - [ ] Set up src/core, src/gui, src/platform, src/utils, tests
-   - [ ] Add initial CMakeLists.txt
+   - [x] Set up src/core, src/gui, src/platform, src/utils, tests
+   - [x] Add initial CMakeLists.txt
 
 2. **Configure dependencies**
-   - [ ] Find Qt6 (Core, Widgets, Charts, Concurrent)
-   - [ ] Configure compiler flags: `-Wall -Wextra -Wpedantic`
-   - [ ] Set C++20 standard
+   - [x] Find Qt6 (Core, Widgets, Charts, Concurrent)
+   - [x] Configure compiler flags: `-Wall -Wextra -Wpedantic`
+   - [x] Set C++20 standard
 
 3. **Basic app bootstrap**
-   - [ ] Create minimal Qt application
-   - [ ] Verify build with `cmake` + `make/ninja`
-   - [ ] Add CI placeholder or local build script
+   - [x] Create minimal Qt application
+   - [x] Verify build with `cmake` + `make/ninja`
+   - [x] Add CI placeholder or local build script
 
 ### Acceptance Criteria
 - Project builds cleanly with no warnings
@@ -102,27 +109,27 @@ driverse/
 **Status:** ✅ Complete
 
 ### Deliverables
-- [ ] `FileItem` struct (path, size, inode, dev, mtime, type, flags)
-- [ ] `DeviceInfo` struct (mount point, device, fs type, total/used/free)
-- [ ] `ScanResult` container
-- [ ] `RiskLevel` enum and `CleanupCandidate` struct
-- [ ] Unit tests for data models
+- [x] `FileItem` struct (path, size, inode, dev, mtime, type, flags)
+- [x] `DeviceInfo` struct (mount point, device, fs type, total/used/free)
+- [x] `ScanResult` container
+- [x] `RiskLevel` enum and `CleanupCandidate` struct
+- [x] Unit tests for data models
 
 ### Tasks
 1. **File metadata model**
-   - [ ] Store logical size, allocated size
-   - [ ] Store (dev, ino) for hard-link deduplication
-   - [ ] Flags: isSymlink, isDir, isHardLinked, isProtected, isSparse
-   - [ ] Category and risk level
+   - [x] Store logical size, allocated size
+   - [x] Store (dev, ino) for hard-link deduplication
+   - [x] Flags: isSymlink, isDir, isHardLinked, isProtected, isSparse
+   - [x] Category and risk level
 
 2. **Device detection types**
-   - [ ] Mount info structure
-   - [ ] Capacity calculation helpers
+   - [x] Mount info structure
+   - [x] Capacity calculation helpers
 
 3. **Recommendation types**
-   - [ ] Risk taxonomy: Safe, Low, Medium, High, SystemProtected
-   - [ ] Confidence level (High/Med/Low) for estimates
-   - [ ] Justification/reason for each recommendation
+   - [x] Risk taxonomy: Safe, Low, Medium, High, SystemProtected
+   - [x] Confidence level (High/Med/Low) for estimates
+   - [x] Justification/reason for each recommendation
 
 ### Acceptance Criteria
 - Data models are complete and documented
@@ -138,41 +145,48 @@ driverse/
 **Status:** ✅ Complete
 
 ### Deliverables
-- [ ] Mount point discovery (parse `/proc/mounts` and/or `/etc/mtab`)
-- [ ] Filesystem boundary detection (device ID tracking)
-- [ ] Protected paths system (denylist + detection)
-- [ ] Pseudo-filesystem exclusion (proc, sys, dev, tmpfs, fuse, overlay)
-- [ ] Symlink handling (no-follow by default, loop detection)
-- [ ] One-filesystem traversal
+- [x] Mount point discovery (parse `/proc/mounts` and/or `/etc/mtab`)
+- [x] Filesystem boundary detection (device ID tracking)
+- [x] Protected paths system (denylist + detection)
+- [x] Pseudo-filesystem exclusion (proc, sys, dev, tmpfs, fuse, overlay)
+- [x] Symlink handling (`AT_SYMLINK_NOFOLLOW` by default)
+- [ ] Loop/cycle detection incl. bind-mount cycles (G1 — deferred, see Known Gaps)
+- [x] One-filesystem traversal
 
 ### Tasks
 1. **Mount detection** (`src/platform/mounts.*`)
-   - [ ] Parse mount info from `/proc/self/mountinfo` or `/proc/mounts`
-   - [ ] Get device major/minor, fs type, mount options
-   - [ ] Classify: local, network (nfs/smb), virtual (tmpfs/proc/sys)
-   - [ ] Filter out pseudo-filesystems by default
+   - [x] Parse mount info from `/proc/self/mountinfo` or `/proc/mounts`
+   - [x] Get device major/minor, fs type, mount options
+   - [x] Classify: local, network (nfs/smb), virtual (tmpfs/proc/sys)
+   - [x] Filter out pseudo-filesystems by default
 
 2. **Path protection** (`src/core/protections.*`)
-   - [ ] Define hard blacklist: `/boot`, `/efi`, `/usr`, `/etc`, `/var/lib`, `/proc`, `/sys`, `/dev`, `/run`, `/snap`
-   - [ ] Define sensitive dirs with warnings (e.g. `/home/*/.config`, but allow caches)
-   - [ ] Check if path is under protected root
-   - [ ] Check if path is system-critical
-   - [ ] Configurable with reset to defaults
+   - [x] Define hard blacklist: `/boot`, `/efi`, `/usr`, `/etc`, `/var/lib`, `/proc`, `/sys`, `/dev`, `/run`, `/snap`
+   - [x] Define sensitive dirs with warnings (e.g. `/home/*/.config`, but allow caches)
+   - [x] Check if path is under protected root
+   - [x] Check if path is system-critical
+   - [x] Configurable with reset to defaults
 
 3. **Traversal safety** (`src/core/scanner.*`)
-   - [ ] Use `std::filesystem` with `directory_options::skip_permission_denied` or `openat` style
-   - [ ] Never follow symlinks when scanning (check `is_symlink()`)
-   - [ ] Track visited directories to detect loops
-   - [ ] Enforce device boundary: only traverse same `st_dev` as root
-   - [ ] Skip cross-filesystem unless explicitly requested
-   - [ ] Handle permission errors gracefully (collect skipped list)
+   - [x] POSIX `opendir`/`readdir` + `fstatat(AT_SYMLINK_NOFOLLOW)` traversal
+   - [x] Never follow symlinks when scanning
+   - [ ] Track visited directories on the recursion stack to detect bind-mount loops (G1 — deferred)
+   - [x] Enforce device boundary: only traverse same `st_dev` as root
+   - [x] Skip cross-filesystem unless explicitly requested
+   - [x] Handle permission errors gracefully (collect skipped list)
 
 ### Acceptance Criteria
-- Cannot traverse into `/proc`, `/sys` when scanning home
-- Cross-filesystem links don't cause spanning
-- Symlink loops detected and handled
-- Protected paths correctly identified
-- Unit tests with temp dirs cover edge cases
+- Cannot traverse into `/proc`, `/sys` when scanning home ✅
+- Cross-filesystem links don't cause spanning ✅
+- Symlink loops detected and handled ✅ (never followed) — bind-mount cycles pending G1
+- Protected paths correctly identified ✅
+- Unit tests with temp dirs cover edge cases ✅
+
+> **Implemented:** `src/platform/mounts.*` (`/proc/self/mountinfo` parsing,
+> statvfs capacity, pseudo/network detection), `src/core/protections.*`,
+> `src/core/utils.*` (component-wise protection matching), and the traversal
+> rules in `src/core/scanner.cpp`. Verified by `tests/core/test_mounts.cpp`
+> and the `protected skip` case in `tests/core/test_scanner.cpp`.
 
 ---
 
@@ -182,45 +196,51 @@ driverse/
 **Status:** ✅ Complete
 
 ### Deliverables
-- [ ] Recursive directory scanner (worker thread)
-- [ ] Progress reporting (files/dirs processed, bytes, ETA)
-- [ ] Cancellation support
-- [ ] Hard-link detection using (dev, ino)
-- [ ] Logical and allocated size calculation
-- [ ] Skipped paths tracking with reasons
-- [ ] Scan options/config
+- [x] Recursive directory scanner (thread-confined; GUI worker thread lands in Phase 8)
+- [x] Progress reporting (files/dirs processed, bytes; ETA deferred — G3)
+- [x] Cancellation support
+- [x] Hard-link detection using (dev, ino)
+- [x] Logical and allocated size calculation
+- [x] Skipped paths tracking with reasons
+- [x] Scan options/config
 
 ### Tasks
 1. **Core scanner** (`src/core/scanner.cpp/h`)
-   - [ ] Non-blocking API: start, cancel, pause/resume (optional)
-   - [ ] Callback for progress: (processed, total_estimate, current_path)
-   - [ ] Collect FileItem for each regular file/dir
-   - [ ] Handle directories, regular files, symlinks separately
+   - [x] Thread-confined API: `scan()` + `cancel()` (start/pause handled by caller)
+   - [x] Progress callback: (files, dirs, bytes, depth, current_path)
+   - [x] Stream every file via item callback; retain bounded top-N in result
+   - [x] Handle directories, regular files, symlinks separately
 
 2. **Size calculation**
-   - [ ] Logical size: `file_size()` or `st_size`
-   - [ ] Allocated size: best effort via `st_blocks * 512` (or `stat` block size). Note confidence if unavailable
-   - [ ] Handle sparse files (logical >> allocated)
-   - [ ] For directories, compute recursive totals post-scan or during
+   - [x] Logical size: `file_size()` or `st_size`
+   - [x] Allocated size: best effort via `st_blocks * 512` (or `stat` block size). Note confidence if unavailable
+   - [x] Handle sparse files (logical >> allocated)
+   - [x] For directories, compute recursive totals post-scan or during
 
 3. **Deduplication & correctness**
-   - [ ] Build map: `key(dev, ino) -> count` to detect hard links
-   - [ ] If link count > 1, mark as hard-linked and avoid double-counting allocation for "recoverable" calculation
-   - [ ] Flag for hard-linked items
-   - [ ] CoW/Btrfs: document limitations in confidence
+   - [x] Build map: `key(dev, ino) -> count` to detect hard links
+   - [x] If link count > 1, mark as hard-linked and avoid double-counting allocation for "recoverable" calculation
+   - [x] Flag for hard-linked items
+   - [x] CoW/Btrfs: document limitations in confidence
 
 4. **Error handling**
-   - [ ] Collect skipped: `{path, reason}` where reason in {PermissionDenied, NotAccessible, Loop, CrossFilesystem, Protected, Other}
-   - [ ] Continue on ENOENT, EACCES gracefully
-   - [ ] Rate-limit error logging to avoid spam
+   - [x] Collect skipped: `{path, reason}` in {PermissionDenied, NotAccessible, Loop, CrossFilesystem, Protected, IsSymlink, PseudoFilesystem, Other}
+   - [x] Continue on ENOENT, EACCES gracefully
+   - [x] Bound recorded skips (kMaxRecordedSkips) to avoid unbounded memory
 
 ### Acceptance Criteria
-- Scans large directories without UI freeze
-- Cancellation works mid-scan
-- Hard links don't double-count allocated space
-- Skipped paths listed with clear reasons
-- Progress updates reasonable
-- Unit tests: hard links, sparse files, symlinks, deep trees
+- Scans large directories without UI freeze (caller runs it off the UI thread) ✅
+- Cancellation works mid-scan ✅
+- Hard links don't double-count allocated space ✅
+- Skipped paths listed with clear reasons ✅
+- Progress updates reasonable ✅
+- Unit tests: hard links, sparse files, symlinks, deep trees ✅
+
+> **Implemented:** `src/core/scanner.{h,cpp}` — hard-link dedup via `(dev, ino)`,
+> `st_blocks*512` allocated size, sparse detection, per-directory aggregates,
+> bounded top-N retention, progress + cancellation, and skipped-path reasons.
+> Verified by `tests/core/test_scanner.cpp` (aggregation, hard links, sparse,
+> exclude, top-N, cancellation, protected skip).
 
 ---
 
@@ -230,23 +250,23 @@ driverse/
 **Status:** ✅ Complete
 
 ### Deliverables
-- [ ] Device discovery service
-- [ ] Mount list with sizes (total/used/available)
-- [ ] Device classification (local vs remote vs virtual)
-- [ ] Dashboard-ready data model
+- [x] Device discovery service
+- [x] Mount list with sizes (total/used/available)
+- [x] Device classification (local vs remote vs virtual)
+- [x] Dashboard-ready data model
 
 ### Tasks
 1. **Device enumeration** (`src/platform/devices.*`)
-   - [ ] Parse `/proc/mounts` / `/proc/self/mountinfo`
-   - [ ] For each mount, get capacity via `statvfs`
-   - [ ] Compute used = total - free (or available vs used)
-   - [ ] Distinguish: physical devices vs partitions (best effort)
-   - [ ] Exclude pseudo-FS from device list shown to user
+   - [x] Parse `/proc/mounts` / `/proc/self/mountinfo`
+   - [x] For each mount, get capacity via `statvfs`
+   - [x] Compute used = total - free (and available-to-user separately)
+   - [ ] Distinguish physical devices vs partitions via sysfs/udev (G2 — deferred)
+   - [x] Exclude pseudo-FS from device list shown to user
 
 2. **Filtering**
-   - [ ] Show only relevant filesystems: ext4/xfs/btrfs/zfs, vfat/exfat (mounted), etc.
-   - [ ] Hide proc/sys/tmpfs from selectable scan targets (or clearly mark)
-   - [ ] Include removable media (USB) if mounted
+   - [x] Filter out pseudo/network filesystems (`getRelevantMounts`)
+   - [x] Hide proc/sys/tmpfs from selectable scan targets
+   - [ ] Explicit removable-media (USB) classification via sysfs (G2 — deferred)
 
 ### Acceptance Criteria
 - Lists all user-accessible local mounts
@@ -662,8 +682,37 @@ We must follow **safety-first** order. Critical safety phases (2, 5, 10) come be
 
 ---
 
+## Open Questions & Known Gaps
+
+| # | Item | Notes / Decision needed |
+|---|---|---|
+| Q1 | **Qt Charts dependency** | Spec/plan assume Qt Charts for the dashboard donut. `qt6-charts` is not installed here and CMake currently requires only Core/Widgets/Concurrent. Either install `qt6-charts` (Arch: `qt6-charts`) or draw the chart with a custom `QPainter` widget. Decision needed before Phase 8. |
+| Q2 | **Bind-mount recursion** | `st_dev` boundary does **not** stop a bind mount of an ancestor into a descendant (same device) → potential infinite recursion. Fix: maintain a recursion-stack `(dev, ino)` set and skip already-visited ancestors. **Not yet implemented** (see G1). |
+| Q3 | **CoW/reflink accounting** | Btrfs/ZFS allocated sizes are lowered in confidence but still summed. Reflinked extents (e.g. `cp --reflink`) are not deduplicated like hard links. Acceptable for v1 if labelled; revisit later. |
+| Q4 | **Test framework** | Tests currently use plain `assert` + CTest. Plan mentions Catch2/Qt Test. Decision: keep lightweight for now; adopt a framework only if fixture complexity grows. |
+
+### Known gaps (deferred, tracked)
+
+- **G1 (safety):** recursion-stack cycle guard for bind-mount loops (see Q2). Belongs in Phase 2/11.
+- **G2:** physical-device vs partition classification and removable-media detection (Phase 4) not implemented; only pseudo/network filtering exists.
+- **G3:** progress "total estimate"/ETA not implemented; scan reports processed counts only.
+- **G4:** sensitive-path warnings (`Protections::isSensitive`) are minimal heuristics.
+
+---
+
+## Progress Log
+
+- **2026-10-15** — `34dc2aa` initial commit (requirements PDF, stub README).
+- **2026-10-15** — `f0fb93b` Phases 0–4 data layer: build system, types, utils,
+  protections, mount detection, hard-link-aware scanner; 4 CTest suites passing,
+  zero warnings.
+
+---
+
 ## Next Steps
 
-**Start with Phase 0.** Let's set up the CMake project structure, configure Qt6, and get a minimal app building.
-
-Would you like to begin Phase 0 now? I can create all the files and get the first build working.
+Core through the scanner (Phases 0–4) is done and tested. Next is **Phase 5:
+Cleanup Recommendation Engine** — heuristic rules + risk classification,
+conservative by default, never name-only, with unit tests. Before/alongside
+that, decide **Q1** (Charts vs custom widget) and schedule **G1** (bind-mount
+cycle guard), which is a genuine robustness/safety issue.
