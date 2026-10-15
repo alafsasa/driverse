@@ -41,16 +41,33 @@ enum class SkipReason {
     Other
 };
 
+// Classification of a cleanup candidate (used by the recommendation engine).
+// Mirrors the heuristic categories; conservative by design — anything not
+// matched by a known rule stays Unknown and is never auto-recommended.
+enum class CleanupCategory {
+    Unknown,
+    ThumbnailCache,     // e.g. ~/.cache/thumbnails (regenerable)
+    BrowserCache,       // Firefox/Chrome/Chromium/Brave caches
+    PackageCache,       // pacman/APT downloaded package caches
+    TempCache,          // /tmp, ~/.cache/tmp (short-lived)
+    BuildArtifact,      // build/, target/, *.o, node_modules (user projects)
+    ApplicationCache,   // generic ~/.cache/<app>
+    LogFile,            // *.log
+    Downloads,          // ~/Downloads (user data, high risk)
+    SystemCache         // /var/cache/apt/archives etc. (delegate to PM)
+};
+
 // File item metadata
 struct FileItem {
     std::filesystem::path path;
     std::filesystem::path name;
     std::uintmax_t logicalSize;      // Logical size in bytes
     std::uintmax_t allocatedSize;    // Allocated size on disk (best effort)
-    std::filesystem::file_time_type mtime;
+    std::chrono::system_clock::time_point mtime;
     FileType type;
     std::uintmax_t inode;
     std::uintmax_t deviceId;         // st_dev
+    std::uintmax_t ownerUid;         // st_uid — used for ownership safety rules
     bool isSymlink;
     bool isDirectory;
     bool isHardLinked;
@@ -86,13 +103,18 @@ struct DeviceInfo {
 // Cleanup candidate
 struct CleanupCandidate {
     std::filesystem::path path;
-    std::uintmax_t logicalSize;
-    std::uintmax_t allocatedSize;    // Estimated recoverable
-    RiskLevel risk;
-    ConfidenceLevel confidence;
-    std::string justification;       // Why it's recommended
-    std::vector<std::string> tags;   // cache, thumbnail, build, etc.
-    bool isUserOwned;
+    CleanupCategory category = CleanupCategory::Unknown;
+    std::uintmax_t logicalSize = 0;
+    std::uintmax_t allocatedSize = 0; // Estimated RECOVERABLE bytes (conservative)
+    RiskLevel risk = RiskLevel::Medium;
+    ConfidenceLevel confidence = ConfidenceLevel::Medium;
+    std::string justification;        // Why it's recommended
+    std::vector<std::string> tags;    // cache, thumbnail, build, etc.
+    bool isUserOwned = false;
+    bool isDirectory = false;
+    bool permanentDeleteAllowed = false; // True only for regenerable, user-owned caches
+    std::uintmax_t ownerUid = 0;
+    std::chrono::system_clock::time_point mtime{};
 };
 
 // Directory aggregate summary
@@ -104,6 +126,8 @@ struct DirectorySummary {
     std::uintmax_t fileCount;
     std::uintmax_t dirCount;
     std::size_t depth;
+    std::uintmax_t ownerUid = 0;          // st_uid — for ownership safety rules
+    std::chrono::system_clock::time_point mtime{};
 };
 
 // Scan statistics

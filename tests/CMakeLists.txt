@@ -16,6 +16,10 @@ add_executable(test_scanner core/test_scanner.cpp)
 target_link_libraries(test_scanner PRIVATE driverse_core)
 add_test(NAME scanner COMMAND test_scanner)
 
+add_executable(test_recommendations core/test_recommendations.cpp)
+target_link_libraries(test_recommendations PRIVATE driverse_core)
+add_test(NAME recommendations COMMAND test_recommendations)
+
 # The bind-mount cycle guard (G1) can only be exercised with mount privileges.
 # If unprivileged user+mount namespaces are available, re-run the scanner suite
 # inside one so the bind-mount test actually executes instead of skipping.

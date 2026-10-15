@@ -279,6 +279,8 @@ private:
                 summary.fileCount = sub.fileCount;
                 summary.dirCount = sub.dirCount;
                 summary.depth = depth + 1;
+                summary.ownerUid = static_cast<std::uintmax_t>(st.st_uid);
+                summary.mtime = std::chrono::system_clock::from_time_t(st.st_mtime);
                 m_res.directories.push_back(summary);
                 if (m_dirCb) m_dirCb(summary);
                 emitProgress(fullPath, static_cast<int>(depth));
@@ -303,6 +305,8 @@ private:
                 item.isProtected = utils::isProtectedPath(fullPath);
                 item.isHardLinked = st.st_nlink > 1;
                 item.sizeConfidence = m_confidence;
+                item.ownerUid = static_cast<std::uintmax_t>(st.st_uid);
+                item.mtime = std::chrono::system_clock::from_time_t(st.st_mtime);
 
                 std::uintmax_t uniqueContribution = item.allocatedSize;
                 if (st.st_nlink > 1) {

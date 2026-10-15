@@ -42,10 +42,12 @@ make -j4
 
 ## Project Status
 
-**Current Phase:** Phases 0–4 complete (foundation, core models, safety/mount
-detection, scanner, device data layer). Phase 5 (recommendation engine) is next.
+**Current Phase:** Phases 0–5 complete (foundation, core models, safety/mount
+detection, scanner, device data layer, recommendation engine). Phase 7 (core
+integration) or Phase 8 (GUI) is next.
 
-**Tests:** `ctest` runs the suites in `tests/` (types, utils, mounts, scanner).
+**Tests:** `ctest` runs the suites in `tests/` (types, utils, mounts, scanner,
+scanner_userns, recommendations).
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap and known gaps.
 

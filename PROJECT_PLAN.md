@@ -23,7 +23,7 @@ _Last updated: 2026-10-15_
 | 2 | Filesystem Safety & Mount Detection | ✅ Complete |
 | 3 | Filesystem Scanner Implementation | ✅ Complete |
 | 4 | Device Discovery & Dashboard Data | ✅ Complete (data layer) |
-| 5 | Cleanup Recommendation Engine | ⏳ In progress (next) |
+| 5 | Cleanup Recommendation Engine | ✅ Complete |
 | 6 | Application Storage Analysis | ⬜ Pending |
 | 7 | Core Logic Integration & Utilities | ⬜ Pending |
 | 8 | Qt GUI - Dashboard & Device Selection | ⬜ Pending |
@@ -33,10 +33,10 @@ _Last updated: 2026-10-15_
 | 12 | Testing, Documentation & Packaging | ⬜ Pending |
 
 **What exists today:** buildable C++20/Qt6/CMake project; core static library
-(`driverse_core`) with types, utilities, protections, mount detection, and a
-hard-link-aware, bind-mount-cycle-safe filesystem scanner; CTest suite
-(types, utils, mounts, scanner, scanner_userns) all passing with zero compiler
-warnings.
+(`driverse_core`) with types, utilities, protections, mount detection, a
+hard-link-aware, bind-mount-cycle-safe filesystem scanner, and a conservative
+cleanup recommendation engine; CTest suite (types, utils, mounts, scanner,
+scanner_userns, recommendations) all passing with zero compiler warnings.
 
 ## Architecture Goals
 
@@ -288,51 +288,64 @@ driverse/
 **Goal:** Classify files/dirs as cleanup candidates with risk levels and justifications.  
 **Priority:** **CRITICAL** (Safety)  
 **Duration:** 1-2 days  
-**Status:** ⏳ In progress
+**Status:** ✅ Complete
 
 ### Deliverables
-- [ ] Heuristic rules for common caches
-- [ ] Risk classification logic
-- [ ] Confidence scoring
-- [ ] "Safe to delete?" policy separation (heuristic ≠ proof)
-- [ ] Test coverage for rules
+- [x] Heuristic rules for common caches
+- [x] Risk classification logic
+- [x] Confidence scoring
+- [x] "Safe to delete?" policy separation (heuristic ≠ proof)
+- [x] Test coverage for rules
 
 ### Tasks
 1. **Risk taxonomy**
-   - [ ] `Safe`: verified disposable regenerable caches with strong signals
-   - [ ] `Low`: likely disposable, needs confirmation
-   - [ ] `Medium`: ambiguous (e.g. old downloads, build dirs) - requires careful review
-   - [ ] `High`: user data or unclear ownership
-   - [ ] `SystemProtected`: matches protected paths - never auto-select
+   - [x] `Safe`: verified disposable regenerable caches with strong signals
+   - [x] `Low`: likely disposable, needs confirmation
+   - [x] `Medium`: ambiguous (e.g. old downloads, build dirs) - requires careful review
+   - [x] `High`: user data or unclear ownership
+   - [x] `SystemProtected`: matches protected paths - never auto-select
 
 2. **Heuristics** (`src/core/recommendations.*`)
-   - [ ] Thumbnail caches: `~/.cache/thumbnails/`, `~/.thumbnails/` (age + regenerable)
-   - [ ] Browser caches (profile-specific) - mark as low/med
-   - [ ] Package manager caches: `~/.cache/pacman/pkg/`? or system - be conservative; system package caches often need package manager
-   - [ ] Temp dirs: `/tmp`, `~/.cache/tmp` (if old, user-owned)
-   - [ ] Build artifacts: `target/`, `build/`, `CMakeCache.txt`, `*.o` - user projects
-   - [ ] APT cache: `/var/cache/apt/archives` - **system**: high risk, must warn; better delegated
-   - [ ] Flatpak/Snap caches: treat carefully
-   - [ ] Downloads: never assume "old" = safe (user decision)
+   - [x] Thumbnail caches: `~/.cache/thumbnails/`, `~/.thumbnails/` (age + regenerable)
+   - [x] Browser caches (profile-specific) - mark as low/med
+   - [x] Package manager caches: `~/.cache/pacman/pkg/`? or system - be conservative; system package caches often need package manager
+   - [x] Temp dirs: `/tmp`, `~/.cache/tmp` (if old, user-owned)
+   - [x] Build artifacts: `target/`, `build/`, `CMakeCache.txt`, `*.o` - user projects
+   - [x] APT cache: `/var/cache/apt/archives` - **system**: high risk, must warn; better delegated
+   - [ ] Explicit Flatpak/Snap cache detection (G5 — deferred; generic `~/.cache` rule partially covers)
+   - [x] Downloads: never assume "old" = safe (user decision)
 
 3. **Safety rules (hard constraints)**
-   - [ ] If path under protected system dirs → `SystemProtected`, cannot delete
-   - [ ] If path is root-owned and not in explicit safe user caches → at least `Medium` or `High`
-   - [ ] Filename alone insufficient (explicitly enforce this)
-   - [ ] Symlinks: handle separately, don't follow
-   - [ ] If hard-linked and other references exist, note impact
+   - [x] If path under protected system dirs → `SystemProtected`, cannot delete
+   - [x] If path is root-owned and not in explicit safe user caches → at least `Medium` or `High`
+   - [x] Filename alone insufficient (explicitly enforce this)
+   - [x] Symlinks: handle separately, don't follow
+   - [x] If hard-linked and other references exist, note impact
 
 4. **Confidence & estimates**
-   - [ ] Track confidence in "recoverable space" (allocation accuracy, CoW, hard links)
-   - [ ] Label estimates clearly in UI
-   - [ ] Don't claim full physical free if shared
+   - [x] Track confidence in "recoverable space" (allocation accuracy, CoW, hard links)
+   - [ ] Surface estimates/labels in the UI (Phase 9 — UI not built yet)
+   - [x] Don't claim full physical free if shared
 
 ### Acceptance Criteria
-- Protected paths never classified as Safe
-- Name-only heuristics rejected
-- Each candidate has reason + risk + confidence
-- Conservative by default (prefer Medium/High over Safe)
-- Unit tests cover key cases
+- Protected paths never classified as Safe ✅
+- Name-only heuristics rejected ✅
+- Each candidate has reason + risk + confidence ✅
+- Conservative by default (prefer Medium/High over Safe) ✅
+- Unit tests cover key cases ✅
+
+> **Implemented:** `src/core/recommendations.{h,cpp}` — `RecommendationEngine`
+> with conservative heuristics keyed on full path patterns (thumbnails, browser,
+> package, temp, downloads, logs, build artifacts, generic app caches, system
+> caches). Hard constraints: protected → `SystemProtected` (0 recoverable);
+> non-user-owned → at least `High`; build artifacts → never below `Medium`;
+> hard-linked files → 0 conservative recoverable. `permanentDeleteAllowed` is
+> gated on opt-in + user ownership + regenerable category + age. `recommend()`
+> deduplicates nested directories and excludes files already covered. Verified
+> by `tests/core/test_recommendations.cpp` (15 cases incl. a real scan→recommend
+> end-to-end).
+
+> **Not yet covered:** explicit Flatpak/Snap cache rules (G5).
 
 ---
 
@@ -708,6 +721,7 @@ Open:
 - **G2:** physical-device vs partition classification and removable-media detection (Phase 4) not implemented; only pseudo/network filtering exists.
 - **G3:** progress "total estimate"/ETA not implemented; scan reports processed counts only.
 - **G4:** sensitive-path warnings (`Protections::isSensitive`) are minimal heuristics.
+- **G5:** explicit Flatpak/Snap cache detection (Phase 5) not implemented; the generic `~/.cache` app-cache rule partially covers them.
 
 ---
 
@@ -723,13 +737,16 @@ Open:
   `src/core/scanner.cpp`; `SkipReason::LoopDetected` for cycles; new
   `scanner_userns` CTest runs the scanner under `unshare -rm` to exercise a real
   bind-mount cycle. 5/5 tests pass.
+- **2026-10-15** — Phase 5 recommendation engine: `src/core/recommendations.*`
+  with conservative heuristics, ownership/age/hard-link safety rules, and
+  `recommend()` dedup; scanner now records `ownerUid` + `mtime`; 15 new tests
+  incl. end-to-end scan→recommend. 6/6 tests pass.
 
 ---
 
 ## Next Steps
 
-Core through the scanner (Phases 0–4) is done and tested, including the G1
-bind-mount cycle guard. Next is **Phase 5: Cleanup Recommendation Engine** —
-heuristic rules + risk classification, conservative by default, never
-name-only, with unit tests. Decide **Q1** (Qt Charts vs custom widget) before
-Phase 8.
+Core through the recommendation engine (Phases 0–5) is done and tested,
+including the G1 bind-mount cycle guard. Next is **Phase 7 (core integration:
+config + audit logging)** before the GUI, or **Phase 8** if you prefer to start
+the UI. Decide **Q1** (Qt Charts vs custom widget) before Phase 8.

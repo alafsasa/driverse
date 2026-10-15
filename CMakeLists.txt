@@ -37,6 +37,7 @@ add_library(driverse_core STATIC
     src/core/utils.cpp
     src/core/protections.cpp
     src/core/scanner.cpp
+    src/core/recommendations.cpp
     src/platform/mounts.cpp
 )
 target_include_directories(driverse_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
