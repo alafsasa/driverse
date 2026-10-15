@@ -4,24 +4,36 @@
 #include "platform/mounts.h"
 
 #include "deviceTableModel.h"
+#include "scanmodel.h"
 #include "scanworker.h"
 #include "storageChart.h"
 #include "summaryCard.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
+#include <QClipboard>
+#include <QComboBox>
+#include <QDesktopServices>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
-#include <QListWidget>
+#include <QLineEdit>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QTabWidget>
 #include <QTableView>
+#include <QTextBrowser>
+#include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
 
 namespace driverse::gui {
@@ -32,11 +44,13 @@ QString bytes(std::uintmax_t value) {
     return QString::fromStdString(core::utils::formatBytes(value));
 }
 
+const char* const kRiskNames[5] = {"Safe", "Low", "Medium", "High", "Protected"};
+
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle(QStringLiteral("Driverse - Linux Storage Cleaner"));
-    resize(1100, 720);
+    resize(1200, 820);
 
     m_worker = new ScanWorker(this);
 
@@ -48,6 +62,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_worker, &ScanWorker::failed, this, &MainWindow::onFailed);
 
     refreshDevices();
+    updateRecsSummary();
 }
 
 MainWindow::~MainWindow() = default;
@@ -94,13 +109,13 @@ void MainWindow::buildCentral() {
     controls->addWidget(m_cancelButton);
     rootLayout->addLayout(controls);
 
-    auto* splitter = new QSplitter(Qt::Horizontal, central);
+    auto* mainSplit = new QSplitter(Qt::Vertical, central);
+    auto* topSplit = new QSplitter(Qt::Horizontal, mainSplit);
 
     // ---- Left: device table ----
-    auto* left = new QWidget(splitter);
+    auto* left = new QWidget(topSplit);
     auto* leftLayout = new QVBoxLayout(left);
-    auto* fsLabel = new QLabel(tr("<b>Filesystems</b>"), left);
-    leftLayout->addWidget(fsLabel);
+    leftLayout->addWidget(new QLabel(tr("<b>Filesystems</b>"), left));
 
     m_table = new QTableView(left);
     m_model = new DeviceTableModel(this);
@@ -118,38 +133,16 @@ void MainWindow::buildCentral() {
     leftLayout->addWidget(refreshButton);
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshDevices);
 
-    // ---- Right: dashboard ----
-    auto* right = new QWidget(splitter);
-    auto* rightLayout = new QVBoxLayout(right);
+    topSplit->addWidget(left);
+    topSplit->addWidget(buildDashboard(topSplit));
+    topSplit->setStretchFactor(0, 3);
+    topSplit->setStretchFactor(1, 2);
 
-    auto* cards = new QHBoxLayout();
-    m_cardTotal = new SummaryCard(tr("TOTAL"), right);
-    m_cardUsed = new SummaryCard(tr("USED"), right);
-    m_cardFree = new SummaryCard(tr("FREE"), right);
-    m_cardRecoverable = new SummaryCard(tr("EST. RECOVERABLE"), right);
-    cards->addWidget(m_cardTotal);
-    cards->addWidget(m_cardUsed);
-    cards->addWidget(m_cardFree);
-    cards->addWidget(m_cardRecoverable);
-    rightLayout->addLayout(cards);
-
-    auto* mid = new QHBoxLayout();
-    m_chart = new StorageChart(right);
-    m_chart->setMinimumSize(180, 180);
-    mid->addWidget(m_chart, 1);
-
-    m_topDirs = new QListWidget(right);
-    m_topDirs->setAlternatingRowColors(true);
-    mid->addWidget(m_topDirs, 1);
-    rightLayout->addLayout(mid, 3);
-
-    rightLayout->addWidget(new QLabel(tr("<b>Largest directories (after scan)</b>"), right));
-
-    splitter->addWidget(left);
-    splitter->addWidget(right);
-    splitter->setStretchFactor(0, 3);
-    splitter->setStretchFactor(1, 4);
-    rootLayout->addWidget(splitter, 1);
+    mainSplit->addWidget(topSplit);
+    mainSplit->addWidget(buildResultsPanel(mainSplit));
+    mainSplit->setStretchFactor(0, 2);
+    mainSplit->setStretchFactor(1, 3);
+    rootLayout->addWidget(mainSplit, 1);
 
     setCentralWidget(central);
 
@@ -168,6 +161,167 @@ void MainWindow::buildCentral() {
     m_progress->setValue(0);
     m_progress->setFixedWidth(180);
     statusBar()->addPermanentWidget(m_progress);
+}
+
+QWidget* MainWindow::buildDashboard(QWidget* parent) {
+    auto* panel = new QWidget(parent);
+    auto* layout = new QVBoxLayout(panel);
+
+    auto* cards = new QHBoxLayout();
+    m_cardTotal = new SummaryCard(tr("TOTAL"), panel);
+    m_cardUsed = new SummaryCard(tr("USED"), panel);
+    m_cardFree = new SummaryCard(tr("FREE"), panel);
+    m_cardRecoverable = new SummaryCard(tr("EST. RECOVERABLE"), panel);
+    cards->addWidget(m_cardTotal);
+    cards->addWidget(m_cardUsed);
+    cards->addWidget(m_cardFree);
+    cards->addWidget(m_cardRecoverable);
+    layout->addLayout(cards);
+
+    layout->addWidget(new QLabel(tr("<b>Storage usage</b>"), panel));
+    m_chart = new StorageChart(panel);
+    m_chart->setMinimumSize(200, 200);
+    layout->addWidget(m_chart, 1);
+    return panel;
+}
+
+QTableView* MainWindow::buildResultsView(QWidget* parent, ResultsTableModel* model) {
+    auto* view = new QTableView(parent);
+    view->setModel(model);
+    view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    view->setSelectionMode(QAbstractItemView::SingleSelection);
+    view->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    view->setAlternatingRowColors(true);
+    view->verticalHeader()->setVisible(false);
+    view->horizontalHeader()->setStretchLastSection(true);
+    view->setSortingEnabled(true);
+
+    const int defaultColumn =
+        (model->mode() == ResultsTableModel::Mode::Recommendations) ? 3 : 4;
+    const Qt::SortOrder defaultOrder =
+        (model->mode() == ResultsTableModel::Mode::Recommendations) ? Qt::AscendingOrder
+                                                                    : Qt::DescendingOrder;
+    view->sortByColumn(defaultColumn, defaultOrder);
+
+    wireResultsView(view, model);
+    return view;
+}
+
+void MainWindow::wireResultsView(QTableView* view, ResultsTableModel* model) {
+    connect(view, &QTableView::doubleClicked, this, [this, model](const QModelIndex& index) {
+        if (index.isValid()) {
+            openContainingFolder(model->pathAt(index.row()));
+        }
+    });
+    view->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(view, &QWidget::customContextMenuRequested, this,
+            [this, view, model](const QPoint& pos) {
+                showResultsContextMenu(view, model, pos);
+            });
+    connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+            [this]() { updateDetails(); });
+}
+
+QWidget* MainWindow::buildResultsPanel(QWidget* parent) {
+    auto* panel = new QWidget(parent);
+    auto* layout = new QVBoxLayout(panel);
+
+    // ---- Filter bar ----
+    auto* filters = new QHBoxLayout();
+    filters->addWidget(new QLabel(tr("Path:"), panel));
+    m_pathFilter = new QLineEdit(panel);
+    m_pathFilter->setPlaceholderText(tr("substring..."));
+    m_pathFilter->setClearButtonEnabled(true);
+    m_pathFilter->setMaximumWidth(240);
+    filters->addWidget(m_pathFilter);
+
+    filters->addWidget(new QLabel(tr("Min size:"), panel));
+    m_minSize = new QDoubleSpinBox(panel);
+    m_minSize->setRange(0.0, 1.0e9);
+    m_minSize->setDecimals(1);
+    m_minSize->setSuffix(tr(" MiB"));
+    m_minSize->setMaximumWidth(120);
+    filters->addWidget(m_minSize);
+
+    for (int i = 0; i < 5; ++i) {
+        m_riskChecks[static_cast<std::size_t>(i)] =
+            new QCheckBox(QString::fromLatin1(kRiskNames[i]), panel);
+        m_riskChecks[static_cast<std::size_t>(i)]->setChecked(true);
+        filters->addWidget(m_riskChecks[static_cast<std::size_t>(i)]);
+    }
+    m_recommendedOnly = new QCheckBox(tr("Recommended only"), panel);
+    filters->addWidget(m_recommendedOnly);
+    filters->addStretch(1);
+    layout->addLayout(filters);
+
+    // ---- Tabs + details ----
+    auto* body = new QHBoxLayout();
+    m_tabs = new QTabWidget(panel);
+
+    m_filesModel = new ResultsTableModel(ResultsTableModel::Mode::Files, this);
+    m_filesView = buildResultsView(m_tabs, m_filesModel);
+    m_tabs->addTab(m_filesView, tr("Largest Files"));
+
+    m_dirsModel = new ResultsTableModel(ResultsTableModel::Mode::Directories, this);
+    m_dirsView = buildResultsView(m_tabs, m_dirsModel);
+    m_tabs->addTab(m_dirsView, tr("Largest Directories"));
+
+    m_recsModel = new ResultsTableModel(ResultsTableModel::Mode::Recommendations, this);
+    auto* recsTab = new QWidget(m_tabs);
+    auto* recsLayout = new QVBoxLayout(recsTab);
+    recsLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto* recsBar = new QHBoxLayout();
+    auto* selectGroup = new QPushButton(tr("Select group"), recsTab);
+    auto* selectAll = new QPushButton(tr("Select all shown"), recsTab);
+    auto* clearSel = new QPushButton(tr("Clear selection"), recsTab);
+    recsBar->addWidget(new QLabel(tr("Group:"), recsTab));
+    m_groupCombo = new QComboBox(recsTab);
+    m_groupCombo->addItems({tr("Safe"), tr("Low"), tr("Medium"), tr("High"),
+                            tr("Protected")});
+    recsBar->addWidget(m_groupCombo);
+    recsBar->addWidget(selectGroup);
+    recsBar->addWidget(selectAll);
+    recsBar->addWidget(clearSel);
+    recsBar->addStretch(1);
+    m_selectionSummary = new QLabel(tr("0 selected"), recsTab);
+    recsBar->addWidget(m_selectionSummary);
+    recsLayout->addLayout(recsBar);
+
+    m_recsView = buildResultsView(recsTab, m_recsModel);
+    recsLayout->addWidget(m_recsView, 1);
+    m_tabs->addTab(recsTab, tr("Recommendations"));
+
+    body->addWidget(m_tabs, 1);
+    m_details = new QTextBrowser(panel);
+    m_details->setMinimumWidth(280);
+    m_details->setMaximumWidth(380);
+    m_details->setHtml(tr("<p style='color:#888'>Select a row to see details.</p>"));
+    body->addWidget(m_details);
+    layout->addLayout(body, 1);
+
+    // ---- Filter wiring (debounced) ----
+    m_filterTimer = new QTimer(this);
+    m_filterTimer->setSingleShot(true);
+    m_filterTimer->setInterval(200);
+    connect(m_filterTimer, &QTimer::timeout, this, &MainWindow::applyFilters);
+
+    auto schedule = [this]() { m_filterTimer->start(); };
+    connect(m_pathFilter, &QLineEdit::textChanged, this, schedule);
+    connect(m_minSize, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, schedule);
+    connect(m_recommendedOnly, &QCheckBox::toggled, this, schedule);
+    for (QCheckBox* check : m_riskChecks) {
+        connect(check, &QCheckBox::toggled, this, schedule);
+    }
+
+    connect(selectGroup, &QPushButton::clicked, this, &MainWindow::selectRiskGroup);
+    connect(selectAll, &QPushButton::clicked, this, &MainWindow::selectAllRecommendations);
+    connect(clearSel, &QPushButton::clicked, this, &MainWindow::clearRecommendations);
+    connect(m_recsModel, &ResultsTableModel::checkedChanged, this,
+            &MainWindow::onRecsCheckedChanged);
+    connect(m_tabs, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
+
+    return panel;
 }
 
 void MainWindow::refreshDevices() {
@@ -243,7 +397,6 @@ void MainWindow::startScan() {
         return;
     }
 
-    m_topDirs->clear();
     m_cardRecoverable->setValue(QStringLiteral("..."));
     m_status->setText(tr("Scanning %1 ...").arg(target));
     setScanning(true);
@@ -270,6 +423,7 @@ void MainWindow::onCompleted(quint64 filesScanned, quint64 dirsScanned, quint64 
     setScanning(false);
     m_progress->setRange(0, 100);
     m_progress->setValue(100);
+    Q_UNUSED(allocated);
 
     const QString prefix = cancelled ? tr("Scan cancelled") : tr("Scan complete");
     m_status->setText(tr("%1: %2 files, %3 dirs, %4 (allocated), %5 skipped, %6 ms")
@@ -279,21 +433,19 @@ void MainWindow::onCompleted(quint64 filesScanned, quint64 dirsScanned, quint64 
                           .arg(bytes(uniqueAllocated))
                           .arg(skippedCount)
                           .arg(durationMs));
-    Q_UNUSED(allocated);
 
     m_cardRecoverable->setValue(bytes(recoverableBytes));
     m_cardRecoverable->setAccent(true);
 
-    m_topDirs->clear();
-    for (const auto& dir : m_worker->topLevelDirectories()) {
-        const QString label = tr("%1  —  %2")
-                                  .arg(bytes(dir.uniqueAllocatedSize),
-                                       QString::fromStdString(dir.path.string()));
-        m_topDirs->addItem(label);
-    }
-    if (m_topDirs->count() == 0) {
-        m_topDirs->addItem(tr("(no subdirectories)"));
-    }
+    const ScanDataPtr data = m_worker->result();
+    m_filesModel->setData(data);
+    m_dirsModel->setData(data);
+    m_recsModel->setData(data);
+    applyFilters();
+
+    m_tabs->setCurrentIndex(0);
+    updateDetails();
+    updateRecsSummary();
 }
 
 void MainWindow::onFailed(const QString& error) {
@@ -312,6 +464,136 @@ void MainWindow::setScanning(bool scanning) {
     if (scanning) {
         m_progress->setRange(0, 0); // busy indicator (no total estimate yet: G3)
         m_progress->setValue(0);
+    }
+}
+
+void MainWindow::applyFilters() {
+    if (!m_filesModel || !m_minSize || !m_pathFilter) {
+        return;
+    }
+    const QString path = m_pathFilter->text();
+    const auto minBytes = static_cast<std::uintmax_t>(m_minSize->value() * 1024.0 * 1024.0);
+    int mask = 0;
+    for (int i = 0; i < 5; ++i) {
+        if (m_riskChecks[static_cast<std::size_t>(i)]->isChecked()) {
+            mask |= (1 << i);
+        }
+    }
+    const bool recOnly = m_recommendedOnly->isChecked();
+
+    m_filesModel->setFilters(path, minBytes, mask, recOnly);
+    m_dirsModel->setFilters(path, minBytes, mask, recOnly);
+    m_recsModel->setFilters(path, minBytes, mask, recOnly);
+
+    updateDetails();
+    updateRecsSummary();
+}
+
+void MainWindow::onTabChanged() {
+    updateDetails();
+}
+
+void MainWindow::updateDetails() {
+    if (!m_details) {
+        return;
+    }
+    QTableView* view = activeResultsView();
+    if (!view) {
+        m_details->clear();
+        return;
+    }
+    const QModelIndex index = view->currentIndex();
+    auto* model = static_cast<ResultsTableModel*>(view->model());
+    if (!index.isValid()) {
+        m_details->setHtml(tr("<p style='color:#888'>Select a row to see details.</p>"));
+        return;
+    }
+    m_details->setHtml(model->detailsHtml(index.row()));
+}
+
+void MainWindow::onRecsCheckedChanged() {
+    updateRecsSummary();
+}
+
+void MainWindow::updateRecsSummary() {
+    if (!m_selectionSummary || !m_recsModel) {
+        return;
+    }
+    const int count = m_recsModel->checkedCount();
+    const std::uintmax_t recoverable = m_recsModel->checkedRecoverable();
+    m_selectionSummary->setText(
+        tr("%1 selected — %2 recoverable").arg(count).arg(bytes(recoverable)));
+}
+
+void MainWindow::selectRiskGroup() {
+    if (!m_groupCombo || !m_recsModel) {
+        return;
+    }
+    m_recsModel->setVisibleChecked(true, m_groupCombo->currentIndex());
+}
+
+void MainWindow::selectAllRecommendations() {
+    if (m_recsModel) {
+        m_recsModel->setVisibleChecked(true, -1);
+    }
+}
+
+void MainWindow::clearRecommendations() {
+    if (m_recsModel) {
+        m_recsModel->setVisibleChecked(false, -1);
+    }
+}
+
+QTableView* MainWindow::activeResultsView() const {
+    if (!m_tabs) {
+        return nullptr;
+    }
+    switch (m_tabs->currentIndex()) {
+        case 0: return m_filesView;
+        case 1: return m_dirsView;
+        case 2: return m_recsView;
+        default: return nullptr;
+    }
+}
+
+ResultsTableModel* MainWindow::activeResultsModel() const {
+    QTableView* view = activeResultsView();
+    return view ? static_cast<ResultsTableModel*>(view->model()) : nullptr;
+}
+
+void MainWindow::showResultsContextMenu(QTableView* view, ResultsTableModel* model,
+                                        const QPoint& pos) {
+    const QModelIndex index = view->indexAt(pos);
+    if (!index.isValid()) {
+        return;
+    }
+    QMenu menu(this);
+    QAction* openAction = menu.addAction(tr("Open containing folder"));
+    QAction* copyPathAction = menu.addAction(tr("Copy path"));
+    QAction* copyDetailsAction = menu.addAction(tr("Copy details"));
+    QAction* chosen = menu.exec(view->viewport()->mapToGlobal(pos));
+    if (!chosen) {
+        return;
+    }
+    if (chosen == openAction) {
+        openContainingFolder(model->pathAt(index.row()));
+    } else if (chosen == copyPathAction) {
+        QApplication::clipboard()->setText(model->pathAt(index.row()));
+    } else if (chosen == copyDetailsAction) {
+        QApplication::clipboard()->setText(model->detailsText(index.row()));
+    }
+}
+
+void MainWindow::openContainingFolder(const QString& path) {
+    if (path.isEmpty()) {
+        return;
+    }
+    const QString dir = QFileInfo(path).absolutePath();
+    if (dir.isEmpty()) {
+        return;
+    }
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(dir))) {
+        m_status->setText(tr("Could not open %1").arg(dir));
     }
 }
 

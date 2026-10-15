@@ -27,8 +27,8 @@ _Last updated: 2026-10-15_
 | 6 | Application Storage Analysis | ⬜ Pending |
 | 7 | Core Logic Integration & Utilities | ✅ Complete |
 | 8 | Qt GUI - Dashboard & Device Selection | ✅ Complete |
-| 9 | Results View - Files, Dirs, & Recommendations | ⬜ Next |
-| 10 | Cleanup Workflow (Dry-Run, Confirm, Execute) | ⬜ Pending |
+| 9 | Results View - Files, Dirs, & Recommendations | ✅ Complete |
+| 10 | Cleanup Workflow (Dry-Run, Confirm, Execute) | ⬜ Next |
 | 11 | Polish, Error Handling & Edge Cases | ⬜ Pending |
 | 12 | Testing, Documentation & Packaging | ⬜ Pending |
 
@@ -38,9 +38,11 @@ hard-link-aware, bind-mount-cycle-safe filesystem scanner, and a conservative
 cleanup recommendation engine; a cross-cutting `src/utils/` module (INI config,
 JSONL audit log, leveled logger, config→core integration); and a `src/gui/`
 dashboard (device table, usage donut, summary cards, background cancellable
-scans). CTest suite (types, utils, mounts, scanner, scanner_userns,
-recommendations, config, audit, integration, logger, devicetablemodel) all
-passing with zero compiler warnings.
+scans) with a filterable/sortable results view (largest files, largest
+directories, and checkable recommendations) plus a details panel. CTest suite
+(types, utils, mounts, scanner, scanner_userns, recommendations, config, audit,
+integration, logger, devicetablemodel, scanmodel, scanworker) all passing with
+zero compiler warnings.
 
 ## Architecture Goals
 
@@ -69,9 +71,11 @@ driverse/
 │   │   ├── audit.h/.cpp        # append-only JSONL audit log
 │   │   ├── logger.h/.cpp       # leveled logger (console + file sink)
 │   │   └── integration.h/.cpp  # Config -> core options bridge
-│   ├── gui/                # Qt UI: dashboard, device model, scan worker
-│   │   ├── mainwindow.h/.cpp        # QMainWindow: split view, menus, status
+│   ├── gui/                # Qt UI: dashboard, results view, scan worker
+│   │   ├── mainwindow.h/.cpp        # QMainWindow: split view, tabs, menus
 │   │   ├── deviceTableModel.h/.cpp  # QAbstractTableModel for filesystems
+│   │   ├── scanmodel.h/.cpp         # filterable/sortable results table model
+│   │   ├── scandata.h               # immutable per-scan snapshot (shared_ptr)
 │   │   ├── storageChart.h/.cpp      # custom QPainter usage donut
 │   │   ├── summaryCard.h/.cpp       # dashboard summary card widget
 │   │   └── scanworker.h/.cpp        # QtConcurrent scan + queued signals
@@ -506,8 +510,8 @@ driverse/
 >   partially-populated entries had uninitialized bools (`isPseudoFs`/
 >   `isNetworkFs`). Added defaults in `types.h`.
 
-> **Deferred to Phase 9:** full results view (files/dirs/recommendations tables),
-> sorting/filtering, risk badges, per-item actions, details panel.
+> **Delivered in Phase 9:** full results view (files/dirs/recommendations tables),
+> sorting/filtering, risk colours, per-item actions, details panel.
 > 
 > **Known gap carried forward:** G3 (no total-scan estimate → progress bar uses
 > an indeterminate busy state).
@@ -517,46 +521,71 @@ driverse/
 ## Phase 9: Results View - Files, Dirs, & Recommendations
 **Goal:** Display scan results with sorting, filtering, and risk classification.  
 **Duration:** 1-2 days  
-**Status:** Pending
+**Status:** ✅ Complete
 
 ### Deliverables
-- [ ] Results tabs: "Largest Files", "Largest Directories", "Recommendations"
-- [ ] Sortable/filterable table
-- [ ] Risk badges/colors
-- [ ] Path actions (Open containing dir, Copy path)
-- [ ] Details panel
+- [x] Results tabs: "Largest Files", "Largest Directories", "Recommendations"
+- [x] Sortable/filterable table
+- [x] Risk badges/colors
+- [x] Path actions (Open containing dir, Copy path)
+- [x] Details panel
 
 ### Tasks
 1. **Results table model** (`src/gui/scanmodel.*`)
-   - [ ] Virtual model for large datasets (handle 10^5+ rows)
-   - [ ] Columns: Name, Path, Type, Logical Size, Allocated Size, Modified, Risk
-   - [ ] Sort by any column
-   - [ ] Role-based formatting (sizes, dates)
+   - [x] Virtual model for large datasets (visible-index list, row cap)
+   - [x] Columns: Name, Path, Type, Logical Size, Allocated Size, Modified, Risk
+   - [x] Sort by any column
+   - [x] Role-based formatting (sizes, dates)
 
 2. **Filtering**
-   - [ ] Filter by risk level (Safe/Low/Med/High/Protected)
-   - [ ] Filter by path substring
-   - [ ] Filter by min size
-   - [ ] "Show only recommended for cleanup"
+   - [x] Filter by risk level (Safe/Low/Med/High/Protected)
+   - [x] Filter by path substring
+   - [x] Filter by min size
+   - [x] "Show only recommended for cleanup"
 
 3. **Recommendations tab**
-   - [ ] Group by risk
-   - [ ] Show justification for each
-   - [ ] Show estimated recoverable
-   - [ ] Selection checkboxes (multi-select)
-   - [ ] "Select all in group" with caution
+   - [x] Group by risk (sorted by risk; per-group select)
+   - [x] Show justification for each
+   - [x] Show estimated recoverable
+   - [x] Selection checkboxes (multi-select)
+   - [x] "Select all in group" with caution
 
 4. **Interactions**
-   - [ ] Double-click to open in file manager (`xdg-open` parent)
-   - [ ] Copy path to clipboard
-   - [ ] Show tooltips with details
+   - [x] Double-click to open in file manager (`QDesktopServices` / xdg-open parent)
+   - [x] Copy path to clipboard (context menu)
+   - [x] Show tooltips with details
 
 ### Acceptance Criteria
-- Large results load smoothly (virtual model)
-- Sorting/filtering fast enough
-- Risk clearly visible
-- Path actions work
-- Can inspect items before cleanup
+- Large results load smoothly (virtual model) ✅
+- Sorting/filtering fast enough ✅ (debounced filters, index-based rebuild)
+- Risk clearly visible ✅ (colour-coded Risk column)
+- Path actions work ✅ (context menu + double-click)
+- Can inspect items before cleanup ✅ (details panel)
+
+> **Implemented:** `src/gui/{scandata.h,scanmodel.*}` + `ScanWorker` result
+> plumbing + `MainWindow` results area.
+> 
+> - `ScanData` is an immutable snapshot (`shared_ptr`) of the full `ScanResult`,
+>   the recommendation list, a path→risk index, and the total recoverable.
+>   `ScanWorker` builds it on the worker thread and hands it to the models.
+> - `ResultsTableModel` is a filterable/sortable `QAbstractTableModel` with three
+>   modes (Files, Directories, Recommendations). Rows are addressed through a
+>   visible-index list so filtering/sorting never copies items; a 200k-row cap
+>   keeps a pathological scan from stalling the view.
+> - Filters: path substring, minimum size, risk mask, "recommended only"; applied
+>   to all three tabs and debounced (200 ms) from the UI.
+> - Recommendations tab: checkboxes per row with "Select group", "Select all
+>   shown" and "Clear selection"; a live "N selected — X recoverable" summary.
+> - Details panel shows full metadata per row; context menu offers Open
+>   containing folder / Copy path / Copy details; double-click opens the parent.
+> 
+> **Test coverage:** `tests/gui/test_scanmodel.cpp` (filters, sorting, risk mask,
+> checkbox selection) and `tests/gui/test_scanworker.cpp` (real background scan →
+> `ScanData`). 13/13 suites pass, zero warnings.
+
+> **Deferred to Phase 10:** the cleanup workflow itself (dry-run, confirmation,
+> execution/trash, audit logging of actions). The Recommendations tab currently
+> only *selects* candidates; nothing is deleted.
 
 ---
 
@@ -806,16 +835,27 @@ Open:
   progress/completed/failed signals and cooperative cancel. Added a device-table
   GUI test and fixed latent UB G7 (`DeviceInfo` missing default initializers).
   11/11 tests pass, zero warnings, app smoke-tested headless.
+- **2026-10-15** — Phase 9 results view: `ScanData` snapshot + `ResultsTableModel`
+  (filterable/sortable, three modes: largest files, largest directories,
+  checkable recommendations) + a `MainWindow` results area with filter bar,
+  details panel, risk colours, and path actions (open containing folder / copy
+  path via context menu, double-click). `ScanWorker` now hands the full result to
+  the views. New tests `test_scanmodel` and `test_scanworker` (real background
+  scan → snapshot). 13/13 tests pass, zero warnings, app smoke-tested headless.
 
 ---
 
 ## Next Steps
 
-Core through the GUI dashboard (Phases 0–5, 7, 8) is done and tested. The
-dashboard shows filesystems, a usage donut, summary cards, and runs cancellable
-background scans. Next is **Phase 9: Results View** — sortable/filterable
-tables for largest files, directories, and recommendations with risk badges and
-per-item actions.
+Core through the results view (Phases 0–5, 7, 8, 9) is done and tested. The app
+can scan a filesystem or folder on a background thread and present the largest
+files, largest directories, and conservative, risk-classified recommendations
+with filtering, sorting, a details panel, and path actions.
+
+Next is **Phase 10: Cleanup Workflow** (safety-critical) — dry-run preview,
+risk-based confirmation, execution with XDG Trash for user files, and audit
+logging. Everything is still read-only: the Recommendations tab only *selects*
+candidates; nothing is removed yet.
 
 Q1 is resolved: the donut is a custom `QPainter` widget (no `qt6-charts`
 dependency), so the build stays reproducible. If you later install

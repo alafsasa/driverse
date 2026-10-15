@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/scanner.h"
+#include "scandata.h"
 
 #include <QFuture>
 #include <QObject>
@@ -8,7 +9,6 @@
 
 #include <atomic>
 #include <mutex>
-#include <vector>
 
 namespace driverse::gui {
 
@@ -31,9 +31,10 @@ public:
 
     bool isRunning() const { return m_running.load(); }
 
-    // Immediate children of the scan root, largest first (bounded). Snapshot
-    // taken at the end of the most recent scan; safe to call from the GUI thread.
-    std::vector<core::DirectorySummary> topLevelDirectories() const;
+    // Full snapshot of the most recent scan (files, directories, recommendations).
+    // Returns null before the first scan finishes. Safe to call from the GUI
+    // thread once `completed` has been emitted.
+    ScanDataPtr result() const;
 
 signals:
     // Emitted from a worker thread; queued to the receiver's thread.
@@ -50,7 +51,7 @@ private:
     std::atomic<bool> m_cancelRequested{false};
 
     mutable std::mutex m_resultMutex;
-    std::vector<core::DirectorySummary> m_topDirs;
+    ScanDataPtr m_data;
 };
 
 } // namespace driverse::gui

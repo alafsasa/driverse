@@ -5,14 +5,14 @@
 
 #include <QtConcurrent>
 
-#include <algorithm>
+#include <chrono>
 #include <cstdlib>
+#include <memory>
+#include <vector>
 
 namespace driverse::gui {
 
 namespace {
-
-constexpr std::size_t kTopDirLimit = 12;
 
 std::filesystem::path homeDirectory() {
     const char* home = std::getenv("HOME");
@@ -54,58 +54,53 @@ void ScanWorker::start(const QString& root) {
     });
 
     m_running = true;
-    m_future = QtConcurrent::run([this]() {
-        const core::ScanResult res = m_scanner.scan();
+    m_future = QtConcurrent::run([this, root]() {
+        core::ScanResult res = m_scanner.scan();
         m_running = false;
-
-        // Snapshot immediate children of the root (depth == 1), largest first.
-        {
-            std::vector<core::DirectorySummary> top;
-            for (const auto& d : res.directories) {
-                if (d.depth == 1) {
-                    top.push_back(d);
-                }
-            }
-            std::sort(top.begin(), top.end(),
-                      [](const core::DirectorySummary& a, const core::DirectorySummary& b) {
-                          return a.uniqueAllocatedSize > b.uniqueAllocatedSize;
-                      });
-            if (top.size() > kTopDirLimit) {
-                top.resize(kTopDirLimit);
-            }
-            std::lock_guard<std::mutex> lock(m_resultMutex);
-            m_topDirs = std::move(top);
-        }
 
         if (!res.error.empty()) {
             emit failed(QString::fromStdString(res.error));
             return;
         }
 
-        // Conservative recoverable estimate from the recommendation engine.
-        std::uintmax_t recoverable = 0;
-        if (res.completed || res.cancelled) {
-            core::RecommendationOptions ropts;
-            ropts.homeDirectory = homeDirectory();
-            ropts.now = std::chrono::system_clock::now();
-            core::RecommendationEngine engine(ropts);
-            recoverable = core::totalRecoverable(engine.recommend(res));
+        // Classify candidates and build the immutable snapshot the views use.
+        core::RecommendationOptions ropts;
+        ropts.homeDirectory = homeDirectory();
+        ropts.now = std::chrono::system_clock::now();
+        core::RecommendationEngine engine(ropts);
+
+        auto snapshot = std::make_shared<ScanData>();
+        snapshot->root = root;
+        snapshot->recommendations = engine.recommend(res);
+        snapshot->totalRecoverable = core::totalRecoverable(snapshot->recommendations);
+        for (const auto& candidate : snapshot->recommendations) {
+            snapshot->riskByPath.emplace(candidate.path.string(), candidate.risk);
+        }
+        snapshot->result = std::move(res);
+
+        const auto& stats = snapshot->result.stats;
+        const quint64 files = static_cast<quint64>(stats.filesScanned);
+        const quint64 dirs = static_cast<quint64>(stats.dirsScanned);
+        const quint64 allocated = static_cast<quint64>(stats.totalAllocatedBytes);
+        const quint64 unique = static_cast<quint64>(stats.uniqueAllocatedBytes);
+        const quint64 skipped = static_cast<quint64>(stats.skippedCount);
+        const quint64 durationMs = static_cast<quint64>(stats.duration.count());
+        const quint64 recoverable = static_cast<quint64>(snapshot->totalRecoverable);
+        const bool cancelled = snapshot->result.cancelled;
+
+        {
+            std::lock_guard<std::mutex> lock(m_resultMutex);
+            m_data = snapshot;
         }
 
-        emit completed(static_cast<quint64>(res.stats.filesScanned),
-                       static_cast<quint64>(res.stats.dirsScanned),
-                       static_cast<quint64>(res.stats.totalAllocatedBytes),
-                       static_cast<quint64>(res.stats.uniqueAllocatedBytes),
-                       static_cast<quint64>(res.stats.skippedCount),
-                       static_cast<quint64>(res.stats.duration.count()),
-                       static_cast<quint64>(recoverable),
-                       res.cancelled);
+        emit completed(files, dirs, allocated, unique, skipped, durationMs, recoverable,
+                       cancelled);
     });
 }
 
-std::vector<core::DirectorySummary> ScanWorker::topLevelDirectories() const {
+ScanDataPtr ScanWorker::result() const {
     std::lock_guard<std::mutex> lock(m_resultMutex);
-    return m_topDirs;
+    return m_data;
 }
 
 void ScanWorker::cancel() {

@@ -60,6 +60,9 @@ add_executable(driverse
     src/gui/summaryCard.h
     src/gui/scanworker.cpp
     src/gui/scanworker.h
+    src/gui/scanmodel.cpp
+    src/gui/scanmodel.h
+    src/gui/scandata.h
 )
 target_link_libraries(driverse PRIVATE
     driverse_core

@@ -5,17 +5,25 @@
 #include <QMainWindow>
 #include <QString>
 
+#include <array>
 #include <vector>
 
+class QCheckBox;
+class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
-class QListWidget;
+class QLineEdit;
 class QProgressBar;
 class QPushButton;
+class QTabWidget;
 class QTableView;
+class QTextBrowser;
+class QTimer;
 
 namespace driverse::gui {
 
 class DeviceTableModel;
+class ResultsTableModel;
 class ScanWorker;
 class StorageChart;
 class SummaryCard;
@@ -41,11 +49,29 @@ private slots:
     void onFailed(const QString& error);
     void showAbout();
 
+    void applyFilters();
+    void onTabChanged();
+    void updateDetails();
+    void onRecsCheckedChanged();
+    void selectRiskGroup();
+    void selectAllRecommendations();
+    void clearRecommendations();
+
 private:
     void buildMenus();
     void buildCentral();
+    QWidget* buildDashboard(QWidget* parent);
+    QWidget* buildResultsPanel(QWidget* parent);
+    QTableView* buildResultsView(QWidget* parent, ResultsTableModel* model);
+    void wireResultsView(QTableView* view, ResultsTableModel* model);
+    void showResultsContextMenu(QTableView* view, ResultsTableModel* model,
+                                const QPoint& pos);
+    void openContainingFolder(const QString& path);
     void setScanning(bool scanning);
     void updateDashboardForDevice(const core::DeviceInfo* device);
+    void updateRecsSummary();
+    QTableView* activeResultsView() const;
+    ResultsTableModel* activeResultsModel() const;
     QString currentTarget() const;
 
     DeviceTableModel* m_model = nullptr;
@@ -56,12 +82,32 @@ private:
     SummaryCard* m_cardUsed = nullptr;
     SummaryCard* m_cardFree = nullptr;
     SummaryCard* m_cardRecoverable = nullptr;
-    QListWidget* m_topDirs = nullptr;
     QLabel* m_targetLabel = nullptr;
 
     QPushButton* m_scanButton = nullptr;
     QPushButton* m_cancelButton = nullptr;
     QPushButton* m_selectButton = nullptr;
+
+    // Results view
+    QTabWidget* m_tabs = nullptr;
+    QTableView* m_filesView = nullptr;
+    QTableView* m_dirsView = nullptr;
+    QTableView* m_recsView = nullptr;
+    ResultsTableModel* m_filesModel = nullptr;
+    ResultsTableModel* m_dirsModel = nullptr;
+    ResultsTableModel* m_recsModel = nullptr;
+    QTextBrowser* m_details = nullptr;
+
+    // Filters
+    QTimer* m_filterTimer = nullptr;
+    QLineEdit* m_pathFilter = nullptr;
+    QDoubleSpinBox* m_minSize = nullptr;
+    QCheckBox* m_recommendedOnly = nullptr;
+    std::array<QCheckBox*, 5> m_riskChecks{};
+
+    // Recommendation selection controls
+    QComboBox* m_groupCombo = nullptr;
+    QLabel* m_selectionSummary = nullptr;
 
     QProgressBar* m_progress = nullptr;
     QLabel* m_status = nullptr;

@@ -42,17 +42,20 @@ make -j4
 
 ## Project Status
 
-**Current Phase:** Phases 0–5, 7, and 8 complete (foundation, core models,
+**Current Phase:** Phases 0–5 and 7–9 complete (foundation, core models,
 safety/mount detection, scanner, device data layer, recommendation engine, the
-config/audit/logging integration layer, and the Qt GUI dashboard with device
-selection and cancellable background scans). Phase 9 (results view) is next.
+config/audit/logging integration layer, the Qt GUI dashboard with device
+selection and cancellable background scans, and the results view with sortable/
+filterable largest-files, largest-directories and recommendation tables). Phase
+10 (cleanup workflow) is next.
 
 **Tests:** `ctest` runs the suites in `tests/` (types, utils, mounts, scanner,
 scanner_userns, recommendations, config, audit, integration, logger,
-devicetablemodel).
+devicetablemodel, scanmodel, scanworker).
 
 **GUI:** The dashboard runs headless for smoke tests with
-`QT_QPA_PLATFORM=offscreen ./driverse`.
+`QT_QPA_PLATFORM=offscreen ./driverse`. Scanning is read-only; the
+Recommendations tab only selects candidates — nothing is deleted.
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap and known gaps.
 

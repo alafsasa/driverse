@@ -45,6 +45,24 @@ add_executable(test_devicetablemodel
 target_link_libraries(test_devicetablemodel PRIVATE driverse_core Qt6::Gui)
 add_test(NAME devicetablemodel COMMAND test_devicetablemodel)
 
+add_executable(test_scanmodel
+    gui/test_scanmodel.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/scanmodel.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/scanmodel.h
+    ${CMAKE_SOURCE_DIR}/src/gui/scandata.h
+)
+target_link_libraries(test_scanmodel PRIVATE driverse_core Qt6::Gui)
+add_test(NAME scanmodel COMMAND test_scanmodel)
+
+add_executable(test_scanworker
+    gui/test_scanworker.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/scanworker.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/scanworker.h
+    ${CMAKE_SOURCE_DIR}/src/gui/scandata.h
+)
+target_link_libraries(test_scanworker PRIVATE driverse_core Qt6::Core Qt6::Concurrent)
+add_test(NAME scanworker COMMAND test_scanworker)
+
 # The bind-mount cycle guard (G1) can only be exercised with mount privileges.
 # If unprivileged user+mount namespaces are available, re-run the scanner suite
 # inside one so the bind-mount test actually executes instead of skipping.
