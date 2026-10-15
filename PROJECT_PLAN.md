@@ -26,8 +26,8 @@ _Last updated: 2026-10-15_
 | 5 | Cleanup Recommendation Engine | ✅ Complete |
 | 6 | Application Storage Analysis | ⬜ Pending |
 | 7 | Core Logic Integration & Utilities | ✅ Complete |
-| 8 | Qt GUI - Dashboard & Device Selection | ⬜ Next |
-| 9 | Results View - Files, Dirs, & Recommendations | ⬜ Pending |
+| 8 | Qt GUI - Dashboard & Device Selection | ✅ Complete |
+| 9 | Results View - Files, Dirs, & Recommendations | ⬜ Next |
 | 10 | Cleanup Workflow (Dry-Run, Confirm, Execute) | ⬜ Pending |
 | 11 | Polish, Error Handling & Edge Cases | ⬜ Pending |
 | 12 | Testing, Documentation & Packaging | ⬜ Pending |
@@ -35,10 +35,12 @@ _Last updated: 2026-10-15_
 **What exists today:** buildable C++20/Qt6/CMake project; core static library
 (`driverse_core`) with types, utilities, protections, mount detection, a
 hard-link-aware, bind-mount-cycle-safe filesystem scanner, and a conservative
-cleanup recommendation engine; plus a cross-cutting `src/utils/` module (INI
-config, JSONL audit log, leveled logger, config→core integration). CTest suite
-(types, utils, mounts, scanner, scanner_userns, recommendations, config, audit,
-integration, logger) all passing with zero compiler warnings.
+cleanup recommendation engine; a cross-cutting `src/utils/` module (INI config,
+JSONL audit log, leveled logger, config→core integration); and a `src/gui/`
+dashboard (device table, usage donut, summary cards, background cancellable
+scans). CTest suite (types, utils, mounts, scanner, scanner_userns,
+recommendations, config, audit, integration, logger, devicetablemodel) all
+passing with zero compiler warnings.
 
 ## Architecture Goals
 
@@ -67,9 +69,14 @@ driverse/
 │   │   ├── audit.h/.cpp        # append-only JSONL audit log
 │   │   ├── logger.h/.cpp       # leveled logger (console + file sink)
 │   │   └── integration.h/.cpp  # Config -> core options bridge
-│   ├── gui/                # Qt UI, models, views            (Phase 8+)
+│   ├── gui/                # Qt UI: dashboard, device model, scan worker
+│   │   ├── mainwindow.h/.cpp        # QMainWindow: split view, menus, status
+│   │   ├── deviceTableModel.h/.cpp  # QAbstractTableModel for filesystems
+│   │   ├── storageChart.h/.cpp      # custom QPainter usage donut
+│   │   ├── summaryCard.h/.cpp       # dashboard summary card widget
+│   │   └── scanworker.h/.cpp        # QtConcurrent scan + queued signals
 │   └── main.cpp            # Qt application entry point
-├── tests/                  # CTest suites (core/* and utils/*)
+├── tests/                  # CTest suites (core/*, utils/*, gui/*)
 ├── data/                   # Resources, icons                 (future)
 ├── docs/                   # Additional docs                  (future)
 └── scripts/                # Build/test scripts
@@ -93,7 +100,7 @@ driverse/
    - [x] Add initial CMakeLists.txt
 
 2. **Configure dependencies**
-   - [x] Find Qt6 (Core, Widgets, Charts, Concurrent)
+   - [x] Find Qt6 (Core, Widgets, Concurrent) — `Charts` not required (Q1: custom donut)
    - [x] Configure compiler flags: `-Wall -Wextra -Wpedantic`
    - [x] Set C++20 standard
 
@@ -441,46 +448,69 @@ driverse/
 ## Phase 8: Qt GUI - Dashboard & Device Selection
 **Goal:** Build main UI with device list, storage overview, and scan controls.  
 **Duration:** 1-2 days  
-**Status:** Pending
+**Status:** ✅ Complete
 
 ### Deliverables
-- [ ] Main window with layout
-- [ ] Device list/table (mount, fs, total/used/free, %)
-- [ ] Storage utilization chart (Qt Charts)
-- [ ] Scan controls (Select dir, Scan, Cancel)
-- [ ] Status bar (progress, stats)
-- [ ] Menu/actions
+- [x] Main window with layout
+- [x] Device list/table (mount, fs, total/used/free, %)
+- [x] Storage utilization chart (custom QPainter donut — Q1 resolved)
+- [x] Scan controls (Select dir, Scan, Cancel)
+- [x] Status bar (progress, stats)
+- [x] Menu/actions
 
 ### Tasks
 1. **Main window** (`src/gui/mainwindow.*`)
-   - [ ] QMainWindow with splitter
-   - [ ] Left: device/filesystem panel
-   - [ ] Right: dashboard area
-   - [ ] Bottom: status/progress
+   - [x] QMainWindow with splitter
+   - [x] Left: device/filesystem panel
+   - [x] Right: dashboard area
+   - [x] Bottom: status/progress
 
 2. **Device model/view**
-   - [ ] `DeviceTableModel` inheriting `QAbstractTableModel`
-   - [ ] Show: Device/Mount, Type, Total, Used, Free, Usage%
-   - [ ] Selection enables "Scan Selected"
-   - [ ] Visual indicators for virtual/remote
+   - [x] `DeviceTableModel` inheriting `QAbstractTableModel`
+   - [x] Show: Device/Mount, Type, Total, Used, Free, Usage%
+   - [x] Selection enables "Scan Selected"
+   - [x] Visual indicators for virtual/remote
 
 3. **Dashboard widgets**
-   - [ ] Donut/pie chart for usage
-   - [ ] Summary cards: Total, Used, Free, Est. Recoverable
-   - [ ] "Largest dirs preview" (post-scan)
-   - [ ] "Scan" button with path selection
+   - [x] Donut/pie chart for usage (dependency-free custom widget)
+   - [x] Summary cards: Total, Used, Free, Est. Recoverable
+   - [x] "Largest dirs preview" (post-scan)
+   - [x] "Scan" button with path selection
 
 4. **Threading**
-   - [ ] Use `QThread` or `QtConcurrent` for scanning
-   - [ ] Emit signals for progress/results
-   - [ ] Keep UI responsive, handle cancellation
+   - [x] Use `QtConcurrent::run` for scanning (`ScanWorker`)
+   - [x] Emit signals for progress/results (queued to GUI thread)
+   - [x] Keep UI responsive, handle cancellation
 
 ### Acceptance Criteria
-- Device list populates on startup
-- Can select mount point and start scan
-- Progress shown during scan
-- Cancel button works
-- UI remains responsive
+- Device list populates on startup ✅
+- Can select mount point and start scan ✅
+- Progress shown during scan ✅
+- Cancel button works ✅
+- UI remains responsive ✅ (smoke-tested headless under `offscreen`)
+
+> **Implemented:** `src/gui/{mainwindow,deviceTableModel,storageChart,summaryCard,scanworker}.{h,cpp}`
+> 
+> - **Q1 resolved:** the donut is a custom `QPainter` `StorageChart` widget —
+>   no `qt6-charts` dependency, keeps the build reproducible.
+> - `DeviceTableModel` (QAbstractTableModel): shows mount/device/type/total/
+>   used/free/usage%, greys virtual/remote rows, highlights high usage (>90%).
+> - `ScanWorker` runs the scanner via `QtConcurrent::run` on a background
+>   thread, emits queued progress/completed/failed signals, and supports
+>   cooperative cancel. It also snapshots the top-level directories and runs
+>   the recommendation engine to produce a conservative recoverable estimate.
+> - `MainWindow`: split-view (device table | dashboard), summary cards, donut,
+>   largest-dirs preview, scan/cancel controls, status + progress bar, and
+>   File/Scan/Help menus. Loads config, applies custom protected paths.
+> - **Fixed (latent UB):** `DeviceInfo` had no default member initializers, so
+>   partially-populated entries had uninitialized bools (`isPseudoFs`/
+>   `isNetworkFs`). Added defaults in `types.h`.
+
+> **Deferred to Phase 9:** full results view (files/dirs/recommendations tables),
+> sorting/filtering, risk badges, per-item actions, details panel.
+> 
+> **Known gap carried forward:** G3 (no total-scan estimate → progress bar uses
+> an indeterminate busy state).
 
 ---
 
@@ -728,7 +758,7 @@ We must follow **safety-first** order. Critical safety phases (2, 5, 10) come be
 
 | # | Item | Notes / Decision needed |
 |---|---|---|
-| Q1 | **Qt Charts dependency** | Spec/plan assume Qt Charts for the dashboard donut. `qt6-charts` is not installed here and CMake currently requires only Core/Widgets/Concurrent. Either install `qt6-charts` (Arch: `qt6-charts`) or draw the chart with a custom `QPainter` widget. Decision needed before Phase 8. |
+| Q1 | **Qt Charts dependency** | ✅ **Resolved (Phase 8).** `qt6-charts` is not installed and cannot be (needs sudo password), so the dashboard donut is a **custom `QPainter` `StorageChart` widget** — no extra dependency, reproducible build, and the existing `DeviceInfo` capacity data is enough. If Qt Charts is added later, only `StorageChart` needs swapping. |
 | Q2 | **Bind-mount recursion** | ✅ **Resolved.** `st_dev` boundary did not stop a bind mount of an ancestor (same device) → potential infinite recursion. Fixed with a recursion-stack `(dev, ino)` set that skips an ancestor re-appearing via bind mount (G1). Covered by the `scanner_userns` CTest (runs under `unshare -rm`). |
 | Q3 | **CoW/reflink accounting** | Btrfs/ZFS allocated sizes are lowered in confidence but still summed. Reflinked extents (e.g. `cp --reflink`) are not deduplicated like hard links. Acceptable for v1 if labelled; revisit later. |
 | Q4 | **Test framework** | Tests currently use plain `assert` + CTest. Plan mentions Catch2/Qt Test. Decision: keep lightweight for now; adopt a framework only if fixture complexity grows. |
@@ -738,6 +768,7 @@ We must follow **safety-first** order. Critical safety phases (2, 5, 10) come be
 Resolved:
 - **G1 (safety):** ✅ Recursion-stack cycle guard for bind-mount loops implemented and tested (see Q2). `SkipReason::LoopDetected` now covers filesystem cycles.
 - **G6 (safety):** ✅ `Protections::isProtected` now honors runtime-registered paths (it previously ignored its own `m_protectedPaths` registry, so custom config paths had no effect). Fixed and tested in Phase 7.
+- **G7 (correctness):** ✅ `DeviceInfo` had no default member initializers, so partially-populated entries (e.g. from the GUI) carried uninitialized bools (`isPseudoFs`/`isNetworkFs`) — a latent UB that surfaced in the device-table test. Added defaults in `types.h`.
 
 Open:
 - **G2:** physical-device vs partition classification and removable-media detection (Phase 4) not implemented; only pseudo/network filtering exists.
@@ -768,13 +799,24 @@ Open:
   plus `describeErrno`/`abbreviatePath`/`isPathUnder`/`canonicalizeNoFollow`
   helpers. Fixed safety bug G6 (`Protections::isProtected` ignoring registered
   paths). 4 new test suites; 10/10 tests pass.
+- **2026-10-15** — Phase 8 Qt GUI dashboard & device selection: new `src/gui/`
+  module (`mainwindow`, `deviceTableModel`, `storageChart`, `summaryCard`,
+  `scanworker`). Custom `QPainter` donut resolves Q1 (no Qt Charts dependency);
+  scans run on a background thread via `QtConcurrent` with queued
+  progress/completed/failed signals and cooperative cancel. Added a device-table
+  GUI test and fixed latent UB G7 (`DeviceInfo` missing default initializers).
+  11/11 tests pass, zero warnings, app smoke-tested headless.
 
 ---
 
 ## Next Steps
 
-Core through the recommendation engine and integration layer (Phases 0–5, 7) is
-done and tested. Next is **Phase 8: Qt GUI (dashboard & device selection)**.
-**Decide Q1 first** (Qt Charts vs a custom `QPainter` widget) — `qt6-charts` is
-not installed here, so the dependency-free custom widget is the practical
-default unless you install it.
+Core through the GUI dashboard (Phases 0–5, 7, 8) is done and tested. The
+dashboard shows filesystems, a usage donut, summary cards, and runs cancellable
+background scans. Next is **Phase 9: Results View** — sortable/filterable
+tables for largest files, directories, and recommendations with risk badges and
+per-item actions.
+
+Q1 is resolved: the donut is a custom `QPainter` widget (no `qt6-charts`
+dependency), so the build stays reproducible. If you later install
+`qt6-charts`, only `StorageChart` needs swapping.

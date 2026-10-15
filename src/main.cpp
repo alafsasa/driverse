@@ -1,34 +1,32 @@
+#include "gui/mainwindow.h"
+
+#include "core/utils.h"
+#include "utils/config.h"
+#include "utils/integration.h"
+#include "utils/logger.h"
+
 #include <QApplication>
-#include <QMainWindow>
-#include <QLabel>
-#include <QVBoxLayout>
-#include <QWidget>
-#include <QStatusBar>
 
-int main(int argc, char *argv[])
-{
+#include <cstdlib>
+
+int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
-    app.setApplicationName("Driverse");
-    app.setApplicationVersion("1.0.0");
-    app.setOrganizationName("driverse");
+    app.setApplicationName(QStringLiteral("Driverse"));
+    app.setApplicationVersion(QStringLiteral("1.0.0"));
+    app.setOrganizationName(QStringLiteral("driverse"));
 
-    QMainWindow window;
-    window.setWindowTitle("Driverse - Linux Storage Cleaner");
-    window.resize(1024, 700);
+    // Load user config (falls back to built-in defaults) and apply custom
+    // protected paths so the UI and scanner honour them.
+    const std::filesystem::path configPath = driverse::utils::defaultConfigPath();
+    driverse::utils::Config config = driverse::utils::Config::load(configPath);
+    driverse::utils::applyProtectedPaths(config, driverse::core::Protections::instance());
 
-    QWidget *centralWidget = new QWidget(&window);
-    QVBoxLayout *layout = new QVBoxLayout(centralWidget);
-    
-    QLabel *label = new QLabel("Driverse - Phase 0 Foundation Complete");
-    label->setAlignment(Qt::AlignCenter);
-    label->setStyleSheet("font-size: 18px; padding: 20px;");
-    
-    layout->addWidget(label);
-    centralWidget->setLayout(layout);
-    
-    window.setCentralWidget(centralWidget);
-    window.statusBar()->showMessage("Ready - Build system initialized");
+    if (const char* home = std::getenv("HOME")) {
+        driverse::utils::Logger::instance().setLogFile(
+            std::filesystem::path(home) / ".local" / "share" / "driverse" / "driverse.log");
+    }
 
+    driverse::gui::MainWindow window;
     window.show();
     return app.exec();
 }

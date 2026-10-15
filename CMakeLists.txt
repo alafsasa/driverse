@@ -50,6 +50,16 @@ target_link_libraries(driverse_core PUBLIC Qt6::Core)
 # ---- Application ----
 add_executable(driverse
     src/main.cpp
+    src/gui/mainwindow.cpp
+    src/gui/mainwindow.h
+    src/gui/deviceTableModel.cpp
+    src/gui/deviceTableModel.h
+    src/gui/storageChart.cpp
+    src/gui/storageChart.h
+    src/gui/summaryCard.cpp
+    src/gui/summaryCard.h
+    src/gui/scanworker.cpp
+    src/gui/scanworker.h
 )
 target_link_libraries(driverse PRIVATE
     driverse_core

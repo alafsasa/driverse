@@ -36,6 +36,15 @@ add_executable(test_logger utils/test_logger.cpp)
 target_link_libraries(test_logger PRIVATE driverse_core)
 add_test(NAME logger COMMAND test_logger)
 
+# GUI tests: compile the Qt model directly and link Qt Gui (no display needed).
+add_executable(test_devicetablemodel
+    gui/test_devicetablemodel.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/deviceTableModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/deviceTableModel.h
+)
+target_link_libraries(test_devicetablemodel PRIVATE driverse_core Qt6::Gui)
+add_test(NAME devicetablemodel COMMAND test_devicetablemodel)
+
 # The bind-mount cycle guard (G1) can only be exercised with mount privileges.
 # If unprivileged user+mount namespaces are available, re-run the scanner suite
 # inside one so the bind-mount test actually executes instead of skipping.

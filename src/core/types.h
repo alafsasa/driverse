@@ -90,14 +90,14 @@ struct DeviceInfo {
     std::string mountPoint;          // Mount point
     std::string fsType;              // Filesystem type
     std::string options;             // Mount options
-    std::uintmax_t totalBytes;
-    std::uintmax_t usedBytes;
-    std::uintmax_t freeBytes;
-    std::uintmax_t availableBytes;   // Available to user
-    bool isPseudoFs;                 // proc/sys/tmpfs etc
-    bool isNetworkFs;                // nfs/smb etc
-    bool isReadOnly;
-    std::uintmax_t deviceId;         // st_dev
+    std::uintmax_t totalBytes = 0;
+    std::uintmax_t usedBytes = 0;
+    std::uintmax_t freeBytes = 0;
+    std::uintmax_t availableBytes = 0;   // Available to user
+    bool isPseudoFs = false;             // proc/sys/tmpfs etc
+    bool isNetworkFs = false;            // nfs/smb etc
+    bool isReadOnly = false;
+    std::uintmax_t deviceId = 0;         // st_dev
 };
 
 // Cleanup candidate
