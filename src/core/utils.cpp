@@ -134,7 +134,7 @@ std::string skipReasonToString(SkipReason reason) {
     switch (reason) {
         case SkipReason::PermissionDenied: return "Permission denied";
         case SkipReason::NotAccessible: return "Not accessible";
-        case SkipReason::LoopDetected: return "Symlink loop detected";
+        case SkipReason::LoopDetected: return "Filesystem cycle detected (bind mount)";
         case SkipReason::CrossFilesystem: return "Cross-filesystem boundary";
         case SkipReason::ProtectedPath: return "Protected system path";
         case SkipReason::IsSymlink: return "Symbolic link (not followed)";

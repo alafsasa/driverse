@@ -34,8 +34,9 @@ _Last updated: 2026-10-15_
 
 **What exists today:** buildable C++20/Qt6/CMake project; core static library
 (`driverse_core`) with types, utilities, protections, mount detection, and a
-hard-link-aware filesystem scanner; CTest suite (types, utils, mounts, scanner)
-all passing with zero compiler warnings.
+hard-link-aware, bind-mount-cycle-safe filesystem scanner; CTest suite
+(types, utils, mounts, scanner, scanner_userns) all passing with zero compiler
+warnings.
 
 ## Architecture Goals
 
@@ -150,7 +151,7 @@ driverse/
 - [x] Protected paths system (denylist + detection)
 - [x] Pseudo-filesystem exclusion (proc, sys, dev, tmpfs, fuse, overlay)
 - [x] Symlink handling (`AT_SYMLINK_NOFOLLOW` by default)
-- [ ] Loop/cycle detection incl. bind-mount cycles (G1 — deferred, see Known Gaps)
+- [x] Loop/cycle detection incl. bind-mount cycles (G1 — recursion-stack `(dev, ino)` guard)
 - [x] One-filesystem traversal
 
 ### Tasks
@@ -170,7 +171,7 @@ driverse/
 3. **Traversal safety** (`src/core/scanner.*`)
    - [x] POSIX `opendir`/`readdir` + `fstatat(AT_SYMLINK_NOFOLLOW)` traversal
    - [x] Never follow symlinks when scanning
-   - [ ] Track visited directories on the recursion stack to detect bind-mount loops (G1 — deferred)
+   - [x] Track visited directories on the recursion stack to detect bind-mount loops (G1 guard)
    - [x] Enforce device boundary: only traverse same `st_dev` as root
    - [x] Skip cross-filesystem unless explicitly requested
    - [x] Handle permission errors gracefully (collect skipped list)
@@ -178,7 +179,7 @@ driverse/
 ### Acceptance Criteria
 - Cannot traverse into `/proc`, `/sys` when scanning home ✅
 - Cross-filesystem links don't cause spanning ✅
-- Symlink loops detected and handled ✅ (never followed) — bind-mount cycles pending G1
+- Symlink loops detected and handled ✅ (never followed); bind-mount cycles detected ✅ (G1 guard)
 - Protected paths correctly identified ✅
 - Unit tests with temp dirs cover edge cases ✅
 
@@ -187,6 +188,13 @@ driverse/
 > `src/core/utils.*` (component-wise protection matching), and the traversal
 > rules in `src/core/scanner.cpp`. Verified by `tests/core/test_mounts.cpp`
 > and the `protected skip` case in `tests/core/test_scanner.cpp`.
+>
+> **G1 (bind-mount cycle guard):** the scanner keeps a recursion-stack set of
+> `(dev, ino)` for active directories and skips any ancestor re-appearing via a
+> bind mount (`SkipReason::LoopDetected`). Covered by the `scanner_userns`
+> CTest target, which re-runs the scanner inside `unshare -rm` so a real
+> bind-mount cycle is created (returns 77/skip where user namespaces are
+> unavailable).
 
 ---
 
@@ -687,13 +695,16 @@ We must follow **safety-first** order. Critical safety phases (2, 5, 10) come be
 | # | Item | Notes / Decision needed |
 |---|---|---|
 | Q1 | **Qt Charts dependency** | Spec/plan assume Qt Charts for the dashboard donut. `qt6-charts` is not installed here and CMake currently requires only Core/Widgets/Concurrent. Either install `qt6-charts` (Arch: `qt6-charts`) or draw the chart with a custom `QPainter` widget. Decision needed before Phase 8. |
-| Q2 | **Bind-mount recursion** | `st_dev` boundary does **not** stop a bind mount of an ancestor into a descendant (same device) → potential infinite recursion. Fix: maintain a recursion-stack `(dev, ino)` set and skip already-visited ancestors. **Not yet implemented** (see G1). |
+| Q2 | **Bind-mount recursion** | ✅ **Resolved.** `st_dev` boundary did not stop a bind mount of an ancestor (same device) → potential infinite recursion. Fixed with a recursion-stack `(dev, ino)` set that skips an ancestor re-appearing via bind mount (G1). Covered by the `scanner_userns` CTest (runs under `unshare -rm`). |
 | Q3 | **CoW/reflink accounting** | Btrfs/ZFS allocated sizes are lowered in confidence but still summed. Reflinked extents (e.g. `cp --reflink`) are not deduplicated like hard links. Acceptable for v1 if labelled; revisit later. |
 | Q4 | **Test framework** | Tests currently use plain `assert` + CTest. Plan mentions Catch2/Qt Test. Decision: keep lightweight for now; adopt a framework only if fixture complexity grows. |
 
-### Known gaps (deferred, tracked)
+### Known gaps (tracked)
 
-- **G1 (safety):** recursion-stack cycle guard for bind-mount loops (see Q2). Belongs in Phase 2/11.
+Resolved:
+- **G1 (safety):** ✅ Recursion-stack cycle guard for bind-mount loops implemented and tested (see Q2). `SkipReason::LoopDetected` now covers filesystem cycles.
+
+Open:
 - **G2:** physical-device vs partition classification and removable-media detection (Phase 4) not implemented; only pseudo/network filtering exists.
 - **G3:** progress "total estimate"/ETA not implemented; scan reports processed counts only.
 - **G4:** sensitive-path warnings (`Protections::isSensitive`) are minimal heuristics.
@@ -706,13 +717,19 @@ We must follow **safety-first** order. Critical safety phases (2, 5, 10) come be
 - **2026-10-15** — `f0fb93b` Phases 0–4 data layer: build system, types, utils,
   protections, mount detection, hard-link-aware scanner; 4 CTest suites passing,
   zero warnings.
+- **2026-10-15** — `19a539f` Plan review: corrected structure tree, added Open
+  Questions (Qt Charts) and Known Gaps, marked completed-phase checkboxes.
+- **2026-10-15** — G1 bind-mount cycle guard: recursion-stack `(dev, ino)` set in
+  `src/core/scanner.cpp`; `SkipReason::LoopDetected` for cycles; new
+  `scanner_userns` CTest runs the scanner under `unshare -rm` to exercise a real
+  bind-mount cycle. 5/5 tests pass.
 
 ---
 
 ## Next Steps
 
-Core through the scanner (Phases 0–4) is done and tested. Next is **Phase 5:
-Cleanup Recommendation Engine** — heuristic rules + risk classification,
-conservative by default, never name-only, with unit tests. Before/alongside
-that, decide **Q1** (Charts vs custom widget) and schedule **G1** (bind-mount
-cycle guard), which is a genuine robustness/safety issue.
+Core through the scanner (Phases 0–4) is done and tested, including the G1
+bind-mount cycle guard. Next is **Phase 5: Cleanup Recommendation Engine** —
+heuristic rules + risk classification, conservative by default, never
+name-only, with unit tests. Decide **Q1** (Qt Charts vs custom widget) before
+Phase 8.

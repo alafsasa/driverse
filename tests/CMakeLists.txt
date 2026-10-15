@@ -15,3 +15,11 @@ add_test(NAME mounts COMMAND test_mounts)
 add_executable(test_scanner core/test_scanner.cpp)
 target_link_libraries(test_scanner PRIVATE driverse_core)
 add_test(NAME scanner COMMAND test_scanner)
+
+# The bind-mount cycle guard (G1) can only be exercised with mount privileges.
+# If unprivileged user+mount namespaces are available, re-run the scanner suite
+# inside one so the bind-mount test actually executes instead of skipping.
+add_test(NAME scanner_userns
+         COMMAND ${CMAKE_SOURCE_DIR}/tests/run_userns.sh
+                 $<TARGET_FILE:test_scanner>)
+set_tests_properties(scanner_userns PROPERTIES SKIP_RETURN_CODE 77)

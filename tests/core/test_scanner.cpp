@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -201,6 +202,71 @@ void testCancellation() {
     std::cout << "  cancellation OK\n";
 }
 
+// A real bind-mount cycle needs root. Attempt it, and skip gracefully if we
+// lack privileges (the common case in CI / dev sandboxes).
+void testBindMountCycle() {
+    fs::path base = g_root / "cycletest";
+    fs::path nested = base / "sub" / "loop";
+    fs::create_directories(nested);
+
+    const std::string src = (base).string();
+    const std::string dst = (nested).string();
+    // Bind-mount the parent onto a directory inside its own subtree.
+    // Silence mount/umount stderr: when unprivileged this fails (expected) and
+    // the real coverage happens via tests/run_userns.sh.
+    std::string mountCmd = "mount --bind '" + src + "' '" + dst + "' >/dev/null 2>&1";
+    if (std::system(mountCmd.c_str()) != 0) {
+        std::cout << "  bind-mount cycle test SKIPPED (needs root/privileged mount)\n";
+        fs::remove_all(base);
+        return;
+    }
+
+    // Ensure we never leave the mount behind.
+    struct Guard {
+        std::string dst;
+        ~Guard() {
+            std::system(("umount '" + dst + "' >/dev/null 2>&1").c_str());
+        }
+    } guard{dst};
+
+    ScanOptions opt;
+    opt.root = base;
+    opt.oneFilesystem = true;      // same device: st_dev alone would NOT stop this
+    opt.skipProtectedPaths = false;
+
+    Scanner scanner;
+    scanner.setOptions(opt);
+    ScanResult r = scanner.scan();
+
+    // Must terminate (not hang) and must have recorded a cycle.
+    bool sawCycle = false;
+    for (const auto& s : r.skipped) {
+        if (s.reason == SkipReason::LoopDetected) {
+            sawCycle = true;
+            break;
+        }
+    }
+    assert(sawCycle && "bind-mount cycle should be detected and skipped");
+    std::cout << "  bind-mount cycle guard OK\n";
+}
+
+void testNoFalseCycleOnNormalTree() {
+    // Sanity: the recursion-stack guard must not flag an ordinary tree as a cycle.
+    ScanOptions opt;
+    opt.root = g_root / "sub";
+    opt.skipProtectedPaths = false;
+
+    Scanner scanner;
+    scanner.setOptions(opt);
+    ScanResult r = scanner.scan();
+
+    for (const auto& s : r.skipped) {
+        assert(s.reason != SkipReason::LoopDetected);
+    }
+    assert(r.completed);
+    std::cout << "  no false cycle on normal tree OK\n";
+}
+
 void testProtectedSkip() {
     // Scanning "/" with protected skipping must never descend into /sys or /proc.
     // Keep it cheap: limit depth so this stays fast.
@@ -235,6 +301,8 @@ int main() {
         testExcludePaths();
         testTopNRetention();
         testCancellation();
+        testNoFalseCycleOnNormalTree();
+        testBindMountCycle();
         testProtectedSkip();
     } catch (...) {
         tearDown();

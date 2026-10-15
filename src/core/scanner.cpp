@@ -138,6 +138,10 @@ public:
         }
         m_rootDev = static_cast<std::uintmax_t>(rootSt.st_dev);
 
+        // Seed the recursion-stack set with the root so a bind mount that re-exposes
+        // an ancestor (same dev+ino) is detected as a cycle rather than recursed forever.
+        m_activeDirs.insert({m_rootDev, static_cast<std::uintmax_t>(rootSt.st_ino)});
+
         emitProgress(m_opt.root, 0);
         DirTotals totals = scanDirectory(m_opt.root, 0);
         m_res.stats.totalLogicalBytes = totals.logical;
@@ -248,7 +252,19 @@ private:
                     continue;
                 }
 
+                // Cycle guard (G1): a bind mount of an ancestor reappears with the same
+                // (dev, ino) on the recursion stack. Detect it before descending.
+                const InodeKey dirKey{static_cast<std::uintmax_t>(st.st_dev),
+                                      static_cast<std::uintmax_t>(st.st_ino)};
+                if (m_activeDirs.find(dirKey) != m_activeDirs.end()) {
+                    recordSkip(fullPath, SkipReason::LoopDetected);
+                    continue;
+                }
+                m_activeDirs.insert(dirKey);
+
                 DirTotals sub = scanDirectory(fullPath, depth + 1);
+
+                m_activeDirs.erase(dirKey);
                 totals.logical += sub.logical;
                 totals.allocated += sub.allocated;
                 totals.uniqueAllocated += sub.uniqueAllocated;
@@ -340,6 +356,8 @@ private:
     ConfidenceLevel m_confidence;
     std::vector<std::filesystem::path> m_exclude;
     std::unordered_set<InodeKey, InodeKeyHash> m_seenInodes;
+    // Directories currently on the recursion stack, for bind-mount cycle detection.
+    std::unordered_set<InodeKey, InodeKeyHash> m_activeDirs;
     std::priority_queue<FileItem, std::vector<FileItem>, LargerOnTop> m_topFiles;
 
     // Callbacks are bound lazily so ScanContext stays cheap to move.
