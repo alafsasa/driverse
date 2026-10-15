@@ -25,8 +25,8 @@ _Last updated: 2026-10-15_
 | 4 | Device Discovery & Dashboard Data | ✅ Complete (data layer) |
 | 5 | Cleanup Recommendation Engine | ✅ Complete |
 | 6 | Application Storage Analysis | ⬜ Pending |
-| 7 | Core Logic Integration & Utilities | ⬜ Pending |
-| 8 | Qt GUI - Dashboard & Device Selection | ⬜ Pending |
+| 7 | Core Logic Integration & Utilities | ✅ Complete |
+| 8 | Qt GUI - Dashboard & Device Selection | ⬜ Next |
 | 9 | Results View - Files, Dirs, & Recommendations | ⬜ Pending |
 | 10 | Cleanup Workflow (Dry-Run, Confirm, Execute) | ⬜ Pending |
 | 11 | Polish, Error Handling & Edge Cases | ⬜ Pending |
@@ -35,8 +35,10 @@ _Last updated: 2026-10-15_
 **What exists today:** buildable C++20/Qt6/CMake project; core static library
 (`driverse_core`) with types, utilities, protections, mount detection, a
 hard-link-aware, bind-mount-cycle-safe filesystem scanner, and a conservative
-cleanup recommendation engine; CTest suite (types, utils, mounts, scanner,
-scanner_userns, recommendations) all passing with zero compiler warnings.
+cleanup recommendation engine; plus a cross-cutting `src/utils/` module (INI
+config, JSONL audit log, leveled logger, config→core integration). CTest suite
+(types, utils, mounts, scanner, scanner_userns, recommendations, config, audit,
+integration, logger) all passing with zero compiler warnings.
 
 ## Architecture Goals
 
@@ -56,19 +58,22 @@ driverse/
 │   │   ├── types.h/.cpp        # FileItem, DeviceInfo, ScanResult, enums
 │   │   ├── utils.h/.cpp        # formatting, path protection, fs classification
 │   │   ├── protections.h/.cpp  # protected/sensitive path registry
-│   │   └── scanner.h/.cpp      # thread-confined filesystem scanner
+│   │   ├── scanner.h/.cpp      # thread-confined filesystem scanner
+│   │   └── recommendations.h/.cpp  # conservative cleanup classifier
 │   ├── platform/           # Linux-specific: mounts, package managers, trash
 │   │   └── mounts.h/.cpp       # /proc mount discovery + statvfs capacity
+│   ├── utils/              # cross-cutting: config, audit, logging, integration
+│   │   ├── config.h/.cpp       # INI config (XDG-aware)
+│   │   ├── audit.h/.cpp        # append-only JSONL audit log
+│   │   ├── logger.h/.cpp       # leveled logger (console + file sink)
+│   │   └── integration.h/.cpp  # Config -> core options bridge
 │   ├── gui/                # Qt UI, models, views            (Phase 8+)
 │   └── main.cpp            # Qt application entry point
-├── tests/                  # CTest suites (core/*)
+├── tests/                  # CTest suites (core/* and utils/*)
 ├── data/                   # Resources, icons                 (future)
 ├── docs/                   # Additional docs                  (future)
 └── scripts/                # Build/test scripts
 ```
-
-> Configuration and logging helpers are currently in `src/core/utils.*`; they
-> will migrate into a dedicated `src/utils/` module in Phase 7 if they grow.
 
 ## Phase 0: Foundation & Environment Setup
 **Goal:** Set up build system, project structure, and development environment.  
@@ -384,36 +389,52 @@ driverse/
 ## Phase 7: Core Logic Integration & Utilities
 **Goal:** Add logging, config, error handling, audit trail.  
 **Duration:** 0.5-1 day  
-**Status:** Pending
+**Status:** ✅ Complete
 
 ### Deliverables
-- [ ] Config system (JSON/YAML or QSettings)
-- [ ] Audit logger (append-only JSON)
-- [ ] Error reporting helpers
-- [ ] Path utilities (normalize, canonicalize carefully)
-- [ ] String/format helpers for sizes
+- [x] Config system (INI-style, dependency-free; XDG-aware)
+- [x] Audit logger (append-only JSON Lines)
+- [x] Error reporting helpers (`describeErrno`, audit `errors[]`)
+- [x] Path utilities (normalize, `isPathUnder`, symlink-safe `canonicalizeNoFollow`)
+- [x] String/format helpers for sizes (`formatBytes`, `formatDuration`, `abbreviatePath`)
 
 ### Tasks
 1. **Configuration** (`src/utils/config.*`)
-   - [ ] Default protected paths, exclude patterns
-   - [ ] UI prefs (sort, columns, confirm thresholds)
-   - [ ] Load/save to `~/.config/driverse/` or XDG
+   - [x] Default protected paths, exclude patterns
+   - [x] Tunables (age thresholds, permanent-delete opt-in) feeding the engine
+   - [x] Load/save to `~/.config/driverse/` or XDG
+   - [ ] UI prefs (sort, columns, confirm thresholds) — Phase 8
 
 2. **Audit logging** (`src/utils/audit.*`)
-   - [ ] Append-only: timestamp, user, action, paths[], sizes, risk, result
-   - [ ] Write to `~/.local/share/driverse/audit.jsonl`
-   - [ ] Include scan id, duration, errors
-   - [ ] Human-readable + machine-parseable
+   - [x] Append-only: timestamp, user, action, paths[], sizes, risk, result
+   - [x] Write to `~/.local/share/driverse/audit.jsonl` (XDG)
+   - [x] Include errors[]
+   - [x] Human-readable + machine-parseable (JSONL)
+   - [ ] scan id/duration — folded into Phase 10 record
 
-3. **Logging framework**
-   - [ ] Simple logger (file + console in debug)
-   - [ ] Log levels: Debug, Info, Warn, Error
-   - [ ] Avoid logging sensitive full paths in debug? maybe truncate
+3. **Logging framework** (`src/utils/logger.*`)
+   - [x] Simple logger (console + optional file sink)
+   - [x] Log levels: Debug, Info, Warn, Error (with min-level filtering)
+   - [x] Path abbreviation helper to avoid leaking long/sensitive paths
+
+4. **Integration bridge** (`src/utils/integration.*`)
+   - [x] `Config` → `RecommendationOptions` / `ScanOptions`
+   - [x] Apply configured protected paths to `Protections` (idempotent)
 
 ### Acceptance Criteria
-- Config persists across runs
-- Audit log records all cleanup operations
-- Logs don't leak excessively
+- Config persists across runs ✅
+- Audit log records operations as append-only JSONL ✅
+- Logs don't leak excessively ✅ (path abbreviation helper available)
+- Config-driven protected paths actually take effect ✅
+
+> **Implemented:** `src/utils/{config,audit,logger,integration}.{h,cpp}` — all pure
+> std, no Qt coupling, fully unit-tested (config, audit, logger, integration).
+> 
+> **Fixed (real bug):** `Protections::isProtected` previously ignored its own
+> registry (`m_protectedPaths`) and only consulted the built-in defaults, so any
+> path added via `addProtectedPath` (e.g. from config) had **no effect**. It now
+> checks both defaults and registered paths, component-wise without following
+> symlinks. Covered by `tests/utils/test_integration.cpp`.
 
 ---
 
@@ -716,6 +737,7 @@ We must follow **safety-first** order. Critical safety phases (2, 5, 10) come be
 
 Resolved:
 - **G1 (safety):** ✅ Recursion-stack cycle guard for bind-mount loops implemented and tested (see Q2). `SkipReason::LoopDetected` now covers filesystem cycles.
+- **G6 (safety):** ✅ `Protections::isProtected` now honors runtime-registered paths (it previously ignored its own `m_protectedPaths` registry, so custom config paths had no effect). Fixed and tested in Phase 7.
 
 Open:
 - **G2:** physical-device vs partition classification and removable-media detection (Phase 4) not implemented; only pseudo/network filtering exists.
@@ -741,12 +763,18 @@ Open:
   with conservative heuristics, ownership/age/hard-link safety rules, and
   `recommend()` dedup; scanner now records `ownerUid` + `mtime`; 15 new tests
   incl. end-to-end scan→recommend. 6/6 tests pass.
+- **2026-10-15** — Phase 7 core integration & utilities: new `src/utils/` module
+  (INI `config`, JSONL `audit` log, leveled `logger`, `integration` bridge),
+  plus `describeErrno`/`abbreviatePath`/`isPathUnder`/`canonicalizeNoFollow`
+  helpers. Fixed safety bug G6 (`Protections::isProtected` ignoring registered
+  paths). 4 new test suites; 10/10 tests pass.
 
 ---
 
 ## Next Steps
 
-Core through the recommendation engine (Phases 0–5) is done and tested,
-including the G1 bind-mount cycle guard. Next is **Phase 7 (core integration:
-config + audit logging)** before the GUI, or **Phase 8** if you prefer to start
-the UI. Decide **Q1** (Qt Charts vs custom widget) before Phase 8.
+Core through the recommendation engine and integration layer (Phases 0–5, 7) is
+done and tested. Next is **Phase 8: Qt GUI (dashboard & device selection)**.
+**Decide Q1 first** (Qt Charts vs a custom `QPainter` widget) — `qt6-charts` is
+not installed here, so the dependency-free custom widget is the practical
+default unless you install it.

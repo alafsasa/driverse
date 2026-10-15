@@ -13,6 +13,14 @@ std::string formatBytes(std::uintmax_t bytes);
 // Format duration in milliseconds
 std::string formatDuration(std::chrono::milliseconds ms);
 
+// Human-readable message for an errno value (e.g. EACCES -> "Permission denied").
+std::string describeErrno(int err);
+
+// Abbreviate a long path for logging by eliding the middle:
+//   /home/alice/very/long/.../file.txt  ->  "/home/alice/.../file.txt"
+// Keeps the leading root and the trailing components. maxLen == 0 disables.
+std::string abbreviatePath(const std::filesystem::path& path, std::size_t maxLen = 80);
+
 // Check if path is under a protected root
 bool isProtectedPath(const std::filesystem::path& path);
 
@@ -27,6 +35,15 @@ std::vector<std::string> getDefaultExcludedFsTypes();
 
 // Normalize path (resolve .. where safe, but don't follow symlinks)
 std::filesystem::path normalizePath(const std::filesystem::path& path);
+
+// True if `child` equals or is nested under `parent`, compared component-wise
+// without resolving symlinks (so "/etcetera" is NOT under "/etc").
+bool isPathUnder(const std::filesystem::path& child, const std::filesystem::path& parent);
+
+// Canonicalize a path for safe operations: resolve symlinks in the existing
+// ancestor components but do NOT follow a symlink in the final component.
+// Use this before deleting, so we act on the link itself, not its target.
+std::filesystem::path canonicalizeNoFollow(const std::filesystem::path& path);
 
 // Convert skip reason to string
 std::string skipReasonToString(SkipReason reason);

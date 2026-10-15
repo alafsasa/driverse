@@ -39,6 +39,10 @@ add_library(driverse_core STATIC
     src/core/scanner.cpp
     src/core/recommendations.cpp
     src/platform/mounts.cpp
+    src/utils/config.cpp
+    src/utils/audit.cpp
+    src/utils/integration.cpp
+    src/utils/logger.cpp
 )
 target_include_directories(driverse_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(driverse_core PUBLIC Qt6::Core)

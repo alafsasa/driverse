@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <system_error>
 
 namespace driverse::core::utils {
 
@@ -40,6 +41,41 @@ std::string formatDuration(std::chrono::milliseconds ms) {
     auto minutes = seconds / 60;
     auto remSec = seconds % 60;
     return std::to_string(minutes) + "m " + std::to_string(remSec) + "s";
+}
+
+std::string describeErrno(int err) {
+    return std::error_code(err, std::generic_category()).message();
+}
+
+std::string abbreviatePath(const std::filesystem::path& path, std::size_t maxLen) {
+    const std::string s = path.string();
+    if (maxLen == 0 || s.size() <= maxLen) {
+        return s;
+    }
+    if (maxLen <= 3) {
+        return "...";
+    }
+
+    // Keep the head (leading components) and the tail (filename / last dirs).
+    const std::size_t keep = maxLen - 3; // room for "..."
+    const std::size_t headLen = keep / 2;
+    const std::size_t tailLen = keep - headLen;
+
+    std::string head = s.substr(0, headLen);
+    std::string tail = s.substr(s.size() - tailLen);
+
+    // Trim to component boundaries so the result stays readable and does not
+    // look like a partial filename.
+    const auto slashHead = head.find_last_of('/');
+    if (slashHead != std::string::npos && slashHead > 0) {
+        head.resize(slashHead);
+    }
+    const auto slashTail = tail.find('/');
+    if (slashTail != std::string::npos && slashTail + 1 < tail.size()) {
+        tail.erase(0, slashTail + 1);
+    }
+
+    return head + "/..." + "/" + tail;
 }
 
 std::vector<std::filesystem::path> getDefaultProtectedPaths() {
@@ -93,10 +129,11 @@ std::vector<std::string> getDefaultExcludedFsTypes() {
     };
 }
 
-// Returns true if `path` equals or is nested under `root` (component-wise, no symlink resolution).
-static bool isUnder(const std::filesystem::path& path, const std::filesystem::path& root) {
-    auto p = path.lexically_normal();
-    auto r = root.lexically_normal();
+// Returns true if `child` equals or is nested under `parent`
+// (component-wise, no symlink resolution).
+bool isPathUnder(const std::filesystem::path& child, const std::filesystem::path& parent) {
+    auto p = child.lexically_normal();
+    auto r = parent.lexically_normal();
     if (p == r) {
         return true;
     }
@@ -114,7 +151,7 @@ static bool isUnder(const std::filesystem::path& path, const std::filesystem::pa
 bool isProtectedPath(const std::filesystem::path& path) {
     auto absPath = std::filesystem::absolute(path);
     for (const auto& prot : getDefaultProtectedPaths()) {
-        if (isUnder(absPath, std::filesystem::absolute(prot))) {
+        if (isPathUnder(absPath, std::filesystem::absolute(prot))) {
             return true;
         }
     }
@@ -128,6 +165,24 @@ std::filesystem::path normalizePath(const std::filesystem::path& path) {
     } catch (...) {
         return path.lexically_normal();
     }
+}
+
+std::filesystem::path canonicalizeNoFollow(const std::filesystem::path& path) {
+    std::error_code ec;
+    const auto parent = path.parent_path();
+    if (parent.empty()) {
+        // No ancestor to resolve; only lexical normalization is safe.
+        return path.lexically_normal();
+    }
+    const auto canonParent = std::filesystem::weakly_canonical(parent, ec);
+    if (ec) {
+        return path.lexically_normal();
+    }
+    const auto name = path.filename();
+    if (name.empty()) {
+        return canonParent;
+    }
+    return (canonParent / name).lexically_normal();
 }
 
 std::string skipReasonToString(SkipReason reason) {

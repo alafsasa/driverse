@@ -14,7 +14,18 @@ Protections::Protections() {
 }
 
 bool Protections::isProtected(const std::filesystem::path& path) const {
-    return utils::isProtectedPath(path);
+    // Built-in defaults...
+    if (utils::isProtectedPath(path)) {
+        return true;
+    }
+    // ...plus any paths registered at runtime (e.g. from user config).
+    const auto abs = std::filesystem::absolute(path);
+    for (const auto& prot : m_protectedPaths) {
+        if (utils::isPathUnder(abs, std::filesystem::absolute(prot))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool Protections::isSensitive(const std::filesystem::path& path) const {
