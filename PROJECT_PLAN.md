@@ -29,8 +29,8 @@ _Last updated: 2026-10-16_
 | 8 | Qt GUI - Dashboard & Device Selection | ✅ Complete |
 | 9 | Results View - Files, Dirs, & Recommendations | ✅ Complete |
 | 10 | Cleanup Workflow (Dry-Run, Confirm, Execute) | ✅ Complete |
-| 11 | Polish, Error Handling & Edge Cases | ⬜ Next |
-| 12 | Testing, Documentation & Packaging | ⬜ Pending |
+| 11 | Polish, Error Handling & Edge Cases | ✅ Complete (2026-10-16) |
+| 12 | Testing, Documentation & Packaging | ⬜ Next |
 
 **What exists today:** buildable C++20/Qt6/CMake project; core static library
 (`driverse_core`) with types, utilities, protections, mount detection, a
@@ -44,10 +44,16 @@ filterable/sortable results view (largest files, largest directories, and
 checkable recommendations), a details panel, and the cleanup workflow dialog
 (plan summary + risk breakdown, item review table, risk-based confirmation
 gates, dry run, apply with trash-first + opt-in permanent delete for Safe
-caches). CTest suite (types, utils, mounts, scanner, scanner_userns,
-recommendations, cleanup, trash, config, audit, cleanupaudit, integration,
-logger, devicetablemodel, scanmodel, scanworker, cleanupdialog) all passing with
-zero compiler warnings.
+caches). Phase 11 added the polish layer: scan-target validation
+(unmounted/non-directory/unreadable targets), a network-filesystem warning,
+actionable ENOSPC/EBUSY/EROFS/EACCES error hints in cleanup + trash, a
+skipped-paths dialog, empty-state messages per tab, keyboard shortcuts
+(Ctrl+F, Ctrl+1/2/3), tooltips/help text, locale-aware size and date formatting,
+and a single shared risk-colour palette. CTest suite (19 targets: types, utils,
+mounts, scanner, scanner_userns, recommendations, cleanup, trash, config, audit,
+cleanupaudit, integration, logger, devicetablemodel, scanmodel, scanworker,
+cleanupdialog, skippedpathsdialog, formatting) all passing with zero compiler
+warnings.
 
 ## Architecture Goals
 
@@ -87,6 +93,8 @@ driverse/
 │   │   ├── storageChart.h/.cpp      # custom QPainter usage donut
 │   │   ├── summaryCard.h/.cpp       # dashboard summary card widget
 │   │   ├── cleanupdialog.h/.cpp     # dry-run preview + confirmation gates + apply
+│   │   ├── skippedpathsdialog.h/.cpp # read-only list of skipped paths + reasons
+│   │   ├── formatting.h             # shared locale-aware sizes/dates + risk palette
 │   │   └── scanworker.h/.cpp        # QtConcurrent scan + queued signals
 │   └── main.cpp            # Qt application entry point
 ├── tests/                  # CTest suites (core/*, utils/*, gui/*)
@@ -710,43 +718,76 @@ driverse/
 ## Phase 11: Polish, Error Handling & Edge Cases
 **Goal:** Improve UX, robustness, and safety for real-world use.  
 **Duration:** 1 day  
-**Status:** Pending
+**Status:** ✅ Complete (2026-10-16)
 
 ### Deliverables
-- [ ] Improved error messages
-- [ ] "Skipped paths" dialog with reasons
-- [ ] Empty state messages
-- [ ] Tooltips and help text
-- [ ] Keyboard shortcuts
-- [ ] About dialog
+- [x] Improved error messages
+- [x] "Skipped paths" dialog with reasons
+- [x] Empty state messages
+- [x] Tooltips and help text
+- [x] Keyboard shortcuts
+- [x] About dialog
 
 ### Tasks
 1. **UX polish**
-   - [ ] Size formatting (B, KiB, MiB, GiB, TiB) with locale-aware
-   - [ ] Date formatting
-   - [ ] Loading spinners/progress bars
-   - [ ] Risk color coding (consistent palette)
-   - [ ] "What's this?" tooltips explaining estimates
+   - [x] Size formatting (B, KiB, MiB, GiB, TiB) with locale-aware presentation
+   - [x] Date formatting (locale short format in tables/details)
+   - [x] Loading spinners/progress bars (indeterminate scan progress; busy cursor during cleanup)
+   - [x] Risk color coding (consistent palette, single source `gui/formatting.h`)
+   - [x] "What's this?" tooltips explaining estimates
 
 2. **Robustness**
-   - [ ] Handle unmounted paths
-   - [ ] Handle permission denied everywhere
-   - [ ] Handle disk full during cleanup (ENOSPC)
-   - [ ] Handle busy files (EBUSY)
-   - [ ] Handle read-only FS (EROFS)
-   - [ ] Network mounts: warn or be cautious
+   - [x] Handle unmounted paths (target validation + friendly errors before scanning)
+   - [x] Handle permission denied everywhere (pre-scan check + scanner skip list + dialog)
+   - [x] Handle disk full during cleanup (ENOSPC)
+   - [x] Handle busy files (EBUSY)
+   - [x] Handle read-only FS (EROFS)
+   - [x] Network mounts: warn or be cautious
 
 3. **Safety review**
-   - [ ] Re-validate all protected checks
-   - [ ] Ensure no root traversal via `..` issues (canonicalize but be careful with symlinks)
-   - [ ] Test with fake protected paths
-   - [ ] Verify audit log integrity
+   - [x] Re-validate all protected checks
+   - [x] Ensure no root traversal via `..` issues (lexical normalization + tests)
+   - [x] Test with fake protected paths
+   - [x] Verify audit log integrity
 
 ### Acceptance Criteria
-- Graceful handling of common errors
-- Clear user feedback
-- No crashes on edge cases
-- Safety checks comprehensive
+- Graceful handling of common errors ✅
+- Clear user feedback ✅
+- No crashes on edge cases ✅
+- Safety checks comprehensive ✅
+
+### Delivered (2026-10-16)
+- **Error handling** — `utils::fsErrorHint()` maps ENOSPC / EBUSY / EROFS /
+  EACCES+EPERM / EXDEV / ENOTEMPTY / ENOENT / EIO to actionable advice, appended
+  to cleanup delete failures (`core/cleanup.cpp`) and trash copy/rename/remove
+  failures (`platform/trash.cpp`). `MainWindow::startScan` pre-validates the
+  target (exists / directory / readable) with specific dialogs, so an unmounted
+  device or permission error never reaches the scanner as a cryptic failure.
+  Network filesystems (mountinfo classification) raise a confirmation warning
+  before scanning.
+- **Skipped paths** — `gui/skippedpathsdialog.{h,cpp}`: read-only table
+  (path + reason, per-reason summary, cap note) for everything the scanner did
+  not descend into; wired to Scan ▸ "Skipped paths…", enabled only when the last
+  scan recorded skips.
+- **Empty states** — results area shows a `QStackedWidget` placeholder when the
+  active tab has no rows: "no scan yet", "no recommendations" (conservative by
+  design), or "no items match the current filters".
+- **Formatting & palette** — `gui/formatting.h` centralizes locale-aware
+  `bytes()` (IEC), locale short dates, risk names and the five-level risk colour
+  palette; `scanmodel`, `cleanupdialog`, `mainwindow`, `deviceTableModel` all
+  use it (cleanup dialog no longer has hardcoded warning colours).
+- **Shortcuts & help** — Ctrl+O select folder, F5 scan, Esc cancel (existing),
+  plus Ctrl+F focuses the path filter and Ctrl+1/2/3 switch tabs. Tooltips on
+  cards, filters, risk checkboxes, buttons, tabs and the chart; About dialog now
+  shows the Qt version and the audit-log path.
+- **Safety review** — verified the cleanup path re-canonicalizes + re-checks
+  protection at plan *and* execution time; added `testProtectedRegistryAtPlanTime`
+  (runtime-registered protected paths and `..`-containing candidates are skipped
+  before any filesystem action) and `fsErrorHint`/formatting tests. Audit
+  before/after records were already covered by `test_cleanupaudit`.
+- **Known limitations (unchanged, tracked):** G3 (no total/ETA progress
+  estimate), G4 (sensitive-path heuristics minimal), cleanup execution remains
+  synchronous (no cancel mid-batch).
 
 ---
 
@@ -914,21 +955,37 @@ Open:
   `test_trash`, `test_cleanup`, `test_cleanupaudit`, `test_cleanupdialog`
   (end-to-end apply with redirected `XDG_DATA_HOME`). 17/17 tests pass, zero
   warnings, app smoke-tested headless.
+- **2026-10-16** — Phase 11 polish, error handling & edge cases:
+  `utils::fsErrorHint` (ENOSPC/EBUSY/EROFS/EACCES/EXDEV/ENOENT/EIO) wired into
+  cleanup + trash failures; scan-target validation and a network-filesystem
+  warning in `MainWindow`; `gui/skippedpathsdialog.*` (Scan ▸ "Skipped paths…");
+  empty-state stack in the results area; `gui/formatting.h` (locale-aware sizes
+  and dates, shared risk palette) adopted by all models/dialogs; shortcuts
+  Ctrl+F / Ctrl+1..3; tooltips across cards, filters, tabs and the chart; About
+  dialog with Qt version + audit-log path. Safety review confirmed plan- and
+  execution-time protection checks, with a new `..`/registry plan-time test.
+  New tests `test_skippedpathsdialog`, `test_formatting`, extended `test_utils`,
+  `test_cleanup`, `test_scanworker`. 19/19 tests pass, zero warnings, app
+  smoke-tested headless.
 
 ---
 
 ## Next Steps
 
-Phases 0–5 and 7–10 are done and tested. The app can scan a filesystem or folder
+Phases 0–5 and 7–11 are done and tested. The app can scan a filesystem or folder
 on a background thread, present the largest files, largest directories, and
 conservative risk-classified recommendations with filtering, sorting, a details
-panel, and path actions, and — after an explicit dry-run-style review — move
-selected candidates to the XDG Trash (or permanently delete opted-in Safe
-caches), recording every action in the audit log.
+panel, empty states, and path actions, and — after an explicit dry-run-style
+review — move selected candidates to the XDG Trash (or permanently delete
+opted-in Safe caches), recording every action in the audit log. Failures carry
+actionable hints (disk full, busy, read-only, ...), skipped paths are explained
+in a dialog, and risky targets (network mounts, unmounted paths) are surfaced
+before the scan starts.
 
-Next is **Phase 11: Polish, Error Handling & Edge Cases** — skipped-paths
-dialog, empty states, locale-aware formatting, ENOSPC/EBUSY/EROFS/unmounted/
-network handling, and a safety review of the cleanup path.
+Next is **Phase 12: Testing, Documentation & Packaging** — README/USER_GUIDE,
+safety notes, a manual test checklist, `.desktop` file + icon placeholder, and
+optional CPack packaging. Phase 6 (application storage analysis via package
+managers, query-only) remains optional and can slot in after packaging.
 
 Q1 is resolved: the donut is a custom `QPainter` widget (no `qt6-charts`
 dependency), so the build stays reproducible. If you later install

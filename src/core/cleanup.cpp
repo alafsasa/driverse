@@ -244,6 +244,10 @@ CleanupReport executeCleanup(const CleanupPlan& plan, const CleanupOptions& opti
             if (ec) {
                 result.status = CleanupStatus::Failed;
                 result.detail = "delete failed: " + ec.message();
+                const std::string hint = utils::fsErrorHint(ec);
+                if (!hint.empty()) {
+                    result.detail += " — " + hint;
+                }
                 ++report.failed;
             } else {
                 result.status = CleanupStatus::Deleted;

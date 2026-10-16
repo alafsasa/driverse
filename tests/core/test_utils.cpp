@@ -99,6 +99,21 @@ static void testErrnoAndAbbreviate() {
     assert(utils::describeErrno(ENOENT) ==
            std::error_code(ENOENT, std::generic_category()).message());
 
+    // fsErrorHint translates common failures into actionable advice.
+    const auto hint = [](int err) {
+        return utils::fsErrorHint(std::error_code(err, std::generic_category()));
+    };
+    assert(hint(ENOSPC).find("full") != std::string::npos);
+    assert(hint(EBUSY).find("in use") != std::string::npos);
+    assert(hint(EROFS).find("read-only") != std::string::npos);
+    assert(hint(EACCES).find("permission denied") != std::string::npos);
+    assert(hint(EPERM) == hint(EACCES));
+    assert(hint(ENOENT).find("no longer exists") != std::string::npos);
+    assert(hint(EIO).find("I/O error") != std::string::npos);
+    // No code / unmapped code -> no hint.
+    assert(hint(0).empty());
+    assert(hint(9999).empty());
+
     // Short paths pass through unchanged.
     assert(utils::abbreviatePath("/tmp/x", 40) == "/tmp/x");
 
@@ -111,7 +126,7 @@ static void testErrnoAndAbbreviate() {
 
     // maxLen == 0 disables abbreviation.
     assert(utils::abbreviatePath(longPath, 0) == longPath.string());
-    std::cout << "  describeErrno/abbreviatePath OK\n";
+    std::cout << "  describeErrno/fsErrorHint/abbreviatePath OK\n";
 }
 
 int main() {

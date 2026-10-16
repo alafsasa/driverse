@@ -84,6 +84,19 @@ target_link_libraries(test_cleanupdialog PRIVATE driverse_core Qt6::Widgets)
 add_test(NAME cleanupdialog COMMAND test_cleanupdialog)
 set_tests_properties(cleanupdialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_skippedpathsdialog
+    gui/test_skippedpathsdialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/skippedpathsdialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/skippedpathsdialog.h
+)
+target_link_libraries(test_skippedpathsdialog PRIVATE driverse_core Qt6::Widgets)
+add_test(NAME skippedpathsdialog COMMAND test_skippedpathsdialog)
+set_tests_properties(skippedpathsdialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_formatting gui/test_formatting.cpp)
+target_link_libraries(test_formatting PRIVATE driverse_core Qt6::Gui)
+add_test(NAME formatting COMMAND test_formatting)
+
 # The bind-mount cycle guard (G1) can only be exercised with mount privileges.
 # If unprivileged user+mount namespaces are available, re-run the scanner suite
 # inside one so the bind-mount test actually executes instead of skipping.

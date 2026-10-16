@@ -1,4 +1,5 @@
 #include "utils.h"
+#include <cerrno>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -45,6 +46,33 @@ std::string formatDuration(std::chrono::milliseconds ms) {
 
 std::string describeErrno(int err) {
     return std::error_code(err, std::generic_category()).message();
+}
+
+std::string fsErrorHint(const std::error_code& ec) {
+    if (!ec) {
+        return {};
+    }
+    switch (ec.value()) {
+        case ENOSPC:
+            return "the device is full — free some space and retry";
+        case EBUSY:
+            return "in use by another process (close it and retry)";
+        case EROFS:
+            return "the filesystem is mounted read-only";
+        case EACCES:
+        case EPERM:
+            return "permission denied (file owned by another user or parent not writable)";
+        case EXDEV:
+            return "source and destination are on different filesystems";
+        case ENOTEMPTY:
+            return "the directory is not empty";
+        case ENOENT:
+            return "it no longer exists (moved, deleted, or unmounted?)";
+        case EIO:
+            return "I/O error (media problem or unreachable remote filesystem?)";
+        default:
+            return {};
+    }
 }
 
 std::string abbreviatePath(const std::filesystem::path& path, std::size_t maxLen) {

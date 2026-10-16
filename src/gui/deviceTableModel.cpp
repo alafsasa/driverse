@@ -1,6 +1,6 @@
 #include "deviceTableModel.h"
 
-#include "core/utils.h"
+#include "formatting.h"
 
 #include <QBrush>
 #include <QColor>
@@ -18,10 +18,6 @@ double usageFraction(const core::DeviceInfo& d) {
     if (f < 0.0) return 0.0;
     if (f > 1.0) return 1.0;
     return f;
-}
-
-QString bytesToQString(std::uintmax_t bytes) {
-    return QString::fromStdString(core::utils::formatBytes(bytes));
 }
 
 } // namespace
@@ -74,9 +70,9 @@ QVariant DeviceTableModel::data(const QModelIndex& index, int role) const {
                     else if (d.isPseudoFs) type += QStringLiteral(" (virtual)");
                     return type;
                 }
-                case Total: return bytesToQString(d.totalBytes);
-                case Used:  return bytesToQString(d.usedBytes);
-                case Free:  return bytesToQString(d.availableBytes);
+                case Total: return formatting::bytes(d.totalBytes);
+                case Used:  return formatting::bytes(d.usedBytes);
+                case Free:  return formatting::bytes(d.availableBytes);
                 case Usage: return QString::number(usageFraction(d) * 100.0, 'f', 0) + "%";
                 default:    return {};
             }

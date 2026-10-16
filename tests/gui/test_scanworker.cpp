@@ -63,6 +63,34 @@ int main(int argc, char** argv) {
         assert(data->riskByPath.count(candidate.path.string()) == 1);
     }
 
+    // A nonexistent root (e.g. an unmounted path) must surface as a failure,
+    // never as a silent empty "success".
+    {
+        ScanWorker failing;
+        QEventLoop failLoop;
+        bool failedSignal = false;
+        bool completedSignal = false;
+        QString error;
+        QObject::connect(&failing, &ScanWorker::completed, &failLoop, [&]() {
+            completedSignal = true;
+            failLoop.quit();
+        });
+        QObject::connect(&failing, &ScanWorker::failed, &failLoop, [&](const QString& message) {
+            failedSignal = true;
+            error = message;
+            failLoop.quit();
+        });
+        QTimer::singleShot(10000, &failLoop, &QEventLoop::quit);
+
+        failing.start(dir.filePath(QStringLiteral("does-not-exist")));
+        failLoop.exec();
+
+        assert(failedSignal);
+        assert(!completedSignal);
+        assert(!error.isEmpty());
+        assert(!failing.isRunning());
+    }
+
     std::cout << "All scan worker tests passed!\n";
     return 0;
 }

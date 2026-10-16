@@ -274,6 +274,34 @@ void testProtectedRecheckAtExecution() {
     fs::remove_all(base);
 }
 
+void testProtectedRegistryAtPlanTime() {
+    // Paths registered at runtime (e.g. from config) must be skipped already at
+    // plan time, before the executor ever runs — including candidates whose
+    // ".." components only normalize into the protected directory later.
+    const fs::path base = makeTempDir("planprotect");
+    const fs::path protectedDir = base / "protected";
+    fs::create_directories(protectedDir);
+
+    const fs::path canonicalDir = driverse::core::utils::canonicalizeNoFollow(protectedDir);
+    driverse::core::Protections::instance().addProtectedPath(canonicalDir);
+
+    const auto options = optionsFor(base, CleanupMode::Apply);
+    const auto plan = driverse::core::buildCleanupPlan(
+        {makeCandidate(protectedDir / "sub" / "..", RiskLevel::Low, false, false, 10),
+         makeCandidate(protectedDir / "sub" / "file.bin", RiskLevel::Low, false, false, 10)},
+        options);
+    driverse::core::Protections::instance().removeProtectedPath(canonicalDir);
+
+    assert(plan.actionableCount == 0);
+    assert(plan.skippedCount == 2);
+    for (const auto& item : plan.items) {
+        assert(item.action == CleanupAction::Skip);
+        assert(item.skipReason == "protected path");
+    }
+
+    fs::remove_all(base);
+}
+
 void testDirectoriesAndStatusStrings() {
     const fs::path base = makeTempDir("dirs");
     const fs::path dir = base / "work" / "cache" / "thumbnails";
@@ -312,6 +340,7 @@ int main() {
     testToctouAbortsOnSubstitution();
     testToctouSkipsWhenConfigured();
     testProtectedRecheckAtExecution();
+    testProtectedRegistryAtPlanTime();
     testDirectoriesAndStatusStrings();
 
     std::cout << "All cleanup tests passed!\n";

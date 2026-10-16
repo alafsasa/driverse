@@ -1,5 +1,7 @@
 #include "trash.h"
 
+#include "core/utils.h"
+
 #include <cerrno>
 #include <cstdlib>
 #include <ctime>
@@ -28,6 +30,11 @@ std::string deletionDate() {
     return std::string(buffer);
 }
 
+std::string withHint(const std::string& message, const std::error_code& ec) {
+    const std::string hint = core::utils::fsErrorHint(ec);
+    return hint.empty() ? message : message + " — " + hint;
+}
+
 } // namespace
 
 std::filesystem::path xdgTrashRoot() {
@@ -45,16 +52,18 @@ bool Trash::ensureReady(std::string* error) const {
     std::filesystem::create_directories(m_root / "files", ec);
     if (ec) {
         if (error) {
-            *error = "cannot create trash files dir " + (m_root / "files").string() +
-                     ": " + ec.message();
+            *error = withHint("cannot create trash files dir " + (m_root / "files").string() +
+                                  ": " + ec.message(),
+                              ec);
         }
         return false;
     }
     std::filesystem::create_directories(m_root / "info", ec);
     if (ec) {
         if (error) {
-            *error = "cannot create trash info dir " + (m_root / "info").string() +
-                     ": " + ec.message();
+            *error = withHint("cannot create trash info dir " + (m_root / "info").string() +
+                                  ": " + ec.message(),
+                              ec);
         }
         return false;
     }
@@ -173,7 +182,7 @@ TrashMoveResult Trash::move(const std::filesystem::path& path) const {
                                      std::filesystem::copy_options::copy_symlinks;
             std::filesystem::copy(path, destPath, copyOptions, copyEc);
             if (copyEc) {
-                result.error = "copy to trash failed: " + copyEc.message();
+                result.error = withHint("copy to trash failed: " + copyEc.message(), copyEc);
                 std::error_code cleanupEc;
                 std::filesystem::remove_all(destPath, cleanupEc);
                 dropInfoRecord();
@@ -183,12 +192,13 @@ TrashMoveResult Trash::move(const std::filesystem::path& path) const {
             std::filesystem::remove_all(path, removeEc);
             if (removeEc) {
                 // The copy exists; keep the record so it can be restored.
-                result.error = "copied to trash but could not remove the original: " +
-                               removeEc.message();
+                result.error = withHint(
+                    "copied to trash but could not remove the original: " + removeEc.message(),
+                    removeEc);
                 return result;
             }
         } else {
-            result.error = "rename to trash failed: " + ec.message();
+            result.error = withHint("rename to trash failed: " + ec.message(), ec);
             dropInfoRecord();
             return result;
         }

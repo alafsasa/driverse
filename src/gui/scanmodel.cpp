@@ -1,7 +1,7 @@
 #include "scanmodel.h"
 
 #include "core/recommendations.h"
-#include "core/utils.h"
+#include "formatting.h"
 
 #include <QBrush>
 #include <QColor>
@@ -22,19 +22,6 @@ namespace {
 // The default sort is by size, so the cap keeps the largest items.
 constexpr int kMaxRows = 200000;
 
-QString bytes(std::uintmax_t value) {
-    return QString::fromStdString(core::utils::formatBytes(value));
-}
-
-QString timeToString(const std::chrono::system_clock::time_point& tp) {
-    const auto secs = std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch());
-    if (secs.count() <= 0) {
-        return QStringLiteral("\u2014");
-    }
-    const QDateTime dt = QDateTime::fromSecsSinceEpoch(static_cast<qint64>(secs.count()));
-    return dt.toString(QStringLiteral("yyyy-MM-dd HH:mm"));
-}
-
 qulonglong timeKey(const std::chrono::system_clock::time_point& tp) {
     const auto secs = std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch());
     return secs.count() > 0 ? static_cast<qulonglong>(secs.count()) : 0ULL;
@@ -50,23 +37,12 @@ QString fileTypeToString(core::FileType type) {
     return QStringLiteral("Other");
 }
 
-QString riskToString(core::RiskLevel risk) {
-    return QString::fromStdString(core::utils::riskLevelToString(risk));
-}
-
 QString confidenceToString(core::ConfidenceLevel level) {
     return QString::fromStdString(core::utils::confidenceLevelToString(level));
 }
 
-QColor riskColor(core::RiskLevel risk) {
-    switch (risk) {
-        case core::RiskLevel::Safe:            return QColor(45, 143, 78);
-        case core::RiskLevel::Low:             return QColor(45, 128, 160);
-        case core::RiskLevel::Medium:          return QColor(191, 138, 32);
-        case core::RiskLevel::High:            return QColor(200, 70, 60);
-        case core::RiskLevel::SystemProtected: return QColor(120, 60, 150);
-    }
-    return QColor(90, 90, 96);
+QString riskToString(core::RiskLevel risk) {
+    return formatting::riskName(risk);
 }
 
 QString fileNameOf(const std::filesystem::path& path) {
@@ -253,9 +229,9 @@ QVariant ResultsTableModel::displayText(int src, int column) const {
                 case 0: return fileNameOf(f.path);
                 case 1: return QString::fromStdString(f.path.string());
                 case 2: return fileTypeToString(f.type);
-                case 3: return bytes(f.logicalSize);
-                case 4: return bytes(f.allocatedSize);
-                case 5: return timeToString(f.mtime);
+                case 3: return formatting::bytes(f.logicalSize);
+                case 4: return formatting::bytes(f.allocatedSize);
+                case 5: return formatting::timeToString(f.mtime);
                 case 6: {
                     const auto r = riskForSource(src);
                     return r ? riskToString(*r) : QStringLiteral("\u2014");
@@ -270,8 +246,8 @@ QVariant ResultsTableModel::displayText(int src, int column) const {
                 case 1: return QString::fromStdString(d.path.string());
                 case 2: return QString::number(d.fileCount);
                 case 3: return QString::number(d.dirCount);
-                case 4: return bytes(d.uniqueAllocatedSize);
-                case 5: return timeToString(d.mtime);
+                case 4: return formatting::bytes(d.uniqueAllocatedSize);
+                case 5: return formatting::timeToString(d.mtime);
                 case 6: {
                     const auto r = riskForSource(src);
                     return r ? riskToString(*r) : QStringLiteral("\u2014");
@@ -286,7 +262,7 @@ QVariant ResultsTableModel::displayText(int src, int column) const {
                 case 1: return QString::fromStdString(c.path.string());
                 case 2: return QString::fromStdString(core::categoryToString(c.category));
                 case 3: return riskToString(c.risk);
-                case 4: return bytes(c.allocatedSize);
+                case 4: return formatting::bytes(c.allocatedSize);
                 case 5: return confidenceToString(c.confidence);
                 case 6: return QString::fromStdString(c.justification);
                 default: return {};
@@ -368,7 +344,7 @@ QVariant ResultsTableModel::data(const QModelIndex& index, int role) const {
             if (index.column() == riskColumn) {
                 const auto r = riskForSource(src);
                 if (r) {
-                    return QBrush(riskColor(*r));
+                    return QBrush(formatting::riskColor(*r));
                 }
             }
             return {};
@@ -482,9 +458,9 @@ QVector<QPair<QString, QString>> ResultsTableModel::detailFields(int src) const 
         case Mode::Files: {
             const auto& f = m_data->result.largestFiles[static_cast<std::size_t>(src)];
             fields.append({QStringLiteral("Type"), fileTypeToString(f.type)});
-            fields.append({QStringLiteral("Logical size"), bytes(f.logicalSize)});
-            fields.append({QStringLiteral("Allocated size"), bytes(f.allocatedSize)});
-            fields.append({QStringLiteral("Modified"), timeToString(f.mtime)});
+            fields.append({QStringLiteral("Logical size"), formatting::bytes(f.logicalSize)});
+            fields.append({QStringLiteral("Allocated size"), formatting::bytes(f.allocatedSize)});
+            fields.append({QStringLiteral("Modified"), formatting::timeToString(f.mtime)});
             fields.append({QStringLiteral("Hard links"), QString::number(f.hardLinkCount)});
             fields.append({QStringLiteral("Inode"), QString::number(f.inode)});
             fields.append({QStringLiteral("Owner uid"), QString::number(f.ownerUid)});
@@ -495,12 +471,12 @@ QVector<QPair<QString, QString>> ResultsTableModel::detailFields(int src) const 
         }
         case Mode::Directories: {
             const auto& d = m_data->result.directories[static_cast<std::size_t>(src)];
-            fields.append({QStringLiteral("Logical size"), bytes(d.logicalSize)});
-            fields.append({QStringLiteral("Allocated (unique)"), bytes(d.uniqueAllocatedSize)});
+            fields.append({QStringLiteral("Logical size"), formatting::bytes(d.logicalSize)});
+            fields.append({QStringLiteral("Allocated (unique)"), formatting::bytes(d.uniqueAllocatedSize)});
             fields.append({QStringLiteral("Files"), QString::number(d.fileCount)});
             fields.append({QStringLiteral("Subdirectories"), QString::number(d.dirCount)});
             fields.append({QStringLiteral("Depth"), QString::number(d.depth)});
-            fields.append({QStringLiteral("Modified"), timeToString(d.mtime)});
+            fields.append({QStringLiteral("Modified"), formatting::timeToString(d.mtime)});
             break;
         }
         case Mode::Recommendations: {
@@ -508,9 +484,9 @@ QVector<QPair<QString, QString>> ResultsTableModel::detailFields(int src) const 
             fields.append({QStringLiteral("Category"),
                            QString::fromStdString(core::categoryToString(c.category))});
             fields.append({QStringLiteral("Risk"), riskToString(c.risk)});
-            fields.append({QStringLiteral("Recoverable"), bytes(c.allocatedSize)});
+            fields.append({QStringLiteral("Recoverable"), formatting::bytes(c.allocatedSize)});
             fields.append({QStringLiteral("Confidence"), confidenceToString(c.confidence)});
-            fields.append({QStringLiteral("Modified"), timeToString(c.mtime)});
+            fields.append({QStringLiteral("Modified"), formatting::timeToString(c.mtime)});
             fields.append({QStringLiteral("Justification"),
                            QString::fromStdString(c.justification)});
             if (!c.tags.empty()) {

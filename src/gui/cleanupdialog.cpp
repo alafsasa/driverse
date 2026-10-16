@@ -1,6 +1,7 @@
 #include "cleanupdialog.h"
 
 #include "core/utils.h"
+#include "formatting.h"
 #include "utils/audit.h"
 #include "utils/cleanupaudit.h"
 
@@ -30,14 +31,6 @@ namespace {
 
 constexpr int kMaxTableRows = 500;
 const char* const kTypeWord = "DELETE";
-
-QString bytes(std::uintmax_t value) {
-    return QString::fromStdString(core::utils::formatBytes(value));
-}
-
-QString riskName(core::RiskLevel risk) {
-    return QString::fromStdString(core::utils::riskLevelToString(risk));
-}
 
 QString actionName(core::CleanupAction action) {
     switch (action) {
@@ -252,7 +245,7 @@ void CleanupDialog::refreshPlan() {
     m_summaryLabel->setText(
         tr("<b>%1</b> item(s) will be removed — <b>%2</b> estimated recoverable.")
             .arg(m_plan.actionableCount)
-            .arg(bytes(m_plan.totalBytes)));
+            .arg(formatting::bytes(m_plan.totalBytes)));
 
     QStringList breakdown;
     for (int i = 0; i < 5; ++i) {
@@ -260,9 +253,9 @@ void CleanupDialog::refreshPlan() {
             continue;
         }
         breakdown << tr("%1: %2 (%3)")
-                         .arg(riskName(static_cast<core::RiskLevel>(i)))
+                         .arg(formatting::riskName(static_cast<core::RiskLevel>(i)))
                          .arg(m_plan.countByRisk[static_cast<std::size_t>(i)])
-                         .arg(bytes(m_plan.bytesByRisk[static_cast<std::size_t>(i)]));
+                         .arg(formatting::bytes(m_plan.bytesByRisk[static_cast<std::size_t>(i)]));
     }
     QString breakdownText = breakdown.isEmpty() ? tr("Nothing is actionable.")
                                                 : breakdown.join(QStringLiteral(" · "));
@@ -321,11 +314,9 @@ void CleanupDialog::refreshPlan() {
         const auto& item = m_plan.items[order[static_cast<std::size_t>(row)]];
         auto* pathItem = new QTableWidgetItem(QString::fromStdString(item.path.string()));
         pathItem->setToolTip(QString::fromStdString(item.path.string()));
-        auto* riskItem = new QTableWidgetItem(riskName(item.risk));
-        if (item.risk == core::RiskLevel::High || item.risk == core::RiskLevel::SystemProtected) {
-            riskItem->setForeground(QColor(0xB0, 0x00, 0x00));
-        }
-        auto* sizeItem = new QTableWidgetItem(bytes(item.allocatedSize));
+        auto* riskItem = new QTableWidgetItem(formatting::riskName(item.risk));
+        riskItem->setForeground(formatting::riskColor(item.risk));
+        auto* sizeItem = new QTableWidgetItem(formatting::bytes(item.allocatedSize));
         QString action = actionName(item.action);
         if (item.action == core::CleanupAction::Skip && !item.skipReason.empty()) {
             action += QStringLiteral(" — ") + QString::fromStdString(item.skipReason);
@@ -514,17 +505,17 @@ void CleanupDialog::showReport(const core::CleanupReport& report) {
                    "(%3 total).</p>")
                     .arg(plannedTrash)
                     .arg(plannedDelete)
-                    .arg(bytes(report.bytesPlanned));
+                    .arg(formatting::bytes(report.bytesPlanned));
     } else {
         html += report.ok() ? tr("<p><b>Cleanup complete.</b></p>")
                             : tr("<p><b>Cleanup finished with problems.</b></p>");
         html += QStringLiteral("<ul>");
         html += tr("<li>Moved to trash: %1 (%2, recoverable)</li>")
                     .arg(report.moved)
-                    .arg(bytes(report.bytesTrashed));
+                    .arg(formatting::bytes(report.bytesTrashed));
         html += tr("<li>Permanently deleted: %1 (%2)</li>")
                     .arg(report.deleted)
-                    .arg(bytes(report.bytesFreed));
+                    .arg(formatting::bytes(report.bytesFreed));
         html += tr("<li>Skipped: %1</li>").arg(report.skipped);
         html += tr("<li>Failed: %1</li>").arg(report.failed);
         html += QStringLiteral("</ul>");

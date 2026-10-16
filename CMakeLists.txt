@@ -68,6 +68,9 @@ add_executable(driverse
     src/gui/scandata.h
     src/gui/cleanupdialog.cpp
     src/gui/cleanupdialog.h
+    src/gui/skippedpathsdialog.cpp
+    src/gui/skippedpathsdialog.h
+    src/gui/formatting.h
 )
 target_link_libraries(driverse PRIVATE
     driverse_core

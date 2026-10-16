@@ -2,11 +2,14 @@
 
 #include "core/utils.h"
 #include "platform/mounts.h"
+#include "utils/audit.h"
 
-#include "deviceTableModel.h"
 #include "cleanupdialog.h"
+#include "deviceTableModel.h"
+#include "formatting.h"
 #include "scanmodel.h"
 #include "scanworker.h"
+#include "skippedpathsdialog.h"
 #include "storageChart.h"
 #include "summaryCard.h"
 
@@ -28,7 +31,9 @@
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QShortcut>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTableView>
@@ -41,11 +46,14 @@ namespace driverse::gui {
 
 namespace {
 
-QString bytes(std::uintmax_t value) {
-    return QString::fromStdString(core::utils::formatBytes(value));
-}
-
 const char* const kRiskNames[5] = {"Safe", "Low", "Medium", "High", "Protected"};
+const char* const kRiskTips[5] = {
+    "Regenerable caches verified as disposable.",
+    "Likely disposable — still review before removing.",
+    "Ambiguous (e.g. old downloads, build dirs) — review carefully.",
+    "May contain user data — requires strong confirmation.",
+    "System critical — never offered for cleanup.",
+};
 
 } // namespace
 
@@ -64,6 +72,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     refreshDevices();
     updateRecsSummary();
+    updateEmptyState();
 }
 
 MainWindow::~MainWindow() = default;
@@ -87,6 +96,12 @@ void MainWindow::buildMenus() {
     cancelAction->setShortcut(QKeySequence(Qt::Key_Escape));
     connect(cancelAction, &QAction::triggered, this, &MainWindow::cancelScan);
 
+    scanMenu->addSeparator();
+    m_skippedAction = scanMenu->addAction(tr("Skipped &paths…"));
+    m_skippedAction->setToolTip(tr("List paths the last scan did not descend into and why"));
+    m_skippedAction->setEnabled(false);
+    connect(m_skippedAction, &QAction::triggered, this, &MainWindow::showSkippedPaths);
+
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
     auto* aboutAction = helpMenu->addAction(tr("&About Driverse"));
     connect(aboutAction, &QAction::triggered, this, &MainWindow::showAbout);
@@ -101,8 +116,11 @@ void MainWindow::buildCentral() {
     m_targetLabel = new QLabel(tr("No target selected"), central);
     m_targetLabel->setStyleSheet(QStringLiteral("color: #55555c;"));
     m_selectButton = new QPushButton(tr("Select Folder..."), central);
+    m_selectButton->setToolTip(tr("Choose a folder to scan (Ctrl+O)"));
     m_scanButton = new QPushButton(tr("Scan"), central);
+    m_scanButton->setToolTip(tr("Scan the selected filesystem or folder (F5)"));
     m_cancelButton = new QPushButton(tr("Cancel"), central);
+    m_cancelButton->setToolTip(tr("Stop the running scan (Esc)"));
     m_cancelButton->setEnabled(false);
     controls->addWidget(m_targetLabel, 1);
     controls->addWidget(m_selectButton);
@@ -170,9 +188,16 @@ QWidget* MainWindow::buildDashboard(QWidget* parent) {
 
     auto* cards = new QHBoxLayout();
     m_cardTotal = new SummaryCard(tr("TOTAL"), panel);
+    m_cardTotal->setToolTip(tr("Total capacity of the selected filesystem."));
     m_cardUsed = new SummaryCard(tr("USED"), panel);
+    m_cardUsed->setToolTip(tr("Space currently used on the selected filesystem."));
     m_cardFree = new SummaryCard(tr("FREE"), panel);
+    m_cardFree->setToolTip(tr("Space available to your user on the selected filesystem."));
     m_cardRecoverable = new SummaryCard(tr("EST. RECOVERABLE"), panel);
+    m_cardRecoverable->setToolTip(
+        tr("Conservative estimate of space cleanup can recover, based on the\n"
+           "recommendation engine. Items moved to the trash are only actually\n"
+           "reclaimed once the trash is emptied."));
     cards->addWidget(m_cardTotal);
     cards->addWidget(m_cardUsed);
     cards->addWidget(m_cardFree);
@@ -234,6 +259,7 @@ QWidget* MainWindow::buildResultsPanel(QWidget* parent) {
     m_pathFilter->setPlaceholderText(tr("substring..."));
     m_pathFilter->setClearButtonEnabled(true);
     m_pathFilter->setMaximumWidth(240);
+    m_pathFilter->setToolTip(tr("Show only rows whose path contains this text (Ctrl+F)"));
     filters->addWidget(m_pathFilter);
 
     filters->addWidget(new QLabel(tr("Min size:"), panel));
@@ -242,15 +268,21 @@ QWidget* MainWindow::buildResultsPanel(QWidget* parent) {
     m_minSize->setDecimals(1);
     m_minSize->setSuffix(tr(" MiB"));
     m_minSize->setMaximumWidth(120);
+    m_minSize->setToolTip(tr("Hide rows whose allocated size is smaller than this."));
     filters->addWidget(m_minSize);
 
     for (int i = 0; i < 5; ++i) {
         m_riskChecks[static_cast<std::size_t>(i)] =
             new QCheckBox(QString::fromLatin1(kRiskNames[i]), panel);
         m_riskChecks[static_cast<std::size_t>(i)]->setChecked(true);
+        m_riskChecks[static_cast<std::size_t>(i)]->setToolTip(
+            tr("Show %1 risk rows: %2")
+                .arg(QString::fromLatin1(kRiskNames[i]),
+                     tr(kRiskTips[i])));
         filters->addWidget(m_riskChecks[static_cast<std::size_t>(i)]);
     }
     m_recommendedOnly = new QCheckBox(tr("Recommended only"), panel);
+    m_recommendedOnly->setToolTip(tr("Show only rows that have a cleanup recommendation."));
     filters->addWidget(m_recommendedOnly);
     filters->addStretch(1);
     layout->addLayout(filters);
@@ -297,7 +329,21 @@ QWidget* MainWindow::buildResultsPanel(QWidget* parent) {
     recsLayout->addWidget(m_recsView, 1);
     m_tabs->addTab(recsTab, tr("Recommendations"));
 
-    body->addWidget(m_tabs, 1);
+    m_tabs->setTabToolTip(0, tr("The largest files found by the last scan."));
+    m_tabs->setTabToolTip(1, tr("Directories with the most space (hard-link deduplicated)."));
+    m_tabs->setTabToolTip(2,
+                          tr("Conservative cleanup suggestions with risk levels. Check the "
+                             "ones to clean up, then press \"Clean up selected…\"."));
+
+    // Empty state: shown instead of the tables when the active tab has no rows.
+    m_resultsStack = new QStackedWidget(panel);
+    m_emptyStateLabel = new QLabel(panel);
+    m_emptyStateLabel->setAlignment(Qt::AlignCenter);
+    m_emptyStateLabel->setWordWrap(true);
+    m_emptyStateLabel->setStyleSheet(QStringLiteral("color:#888;font-size:14px;"));
+    m_resultsStack->addWidget(m_emptyStateLabel);
+    m_resultsStack->addWidget(m_tabs);
+    body->addWidget(m_resultsStack, 1);
     m_details = new QTextBrowser(panel);
     m_details->setMinimumWidth(280);
     m_details->setMaximumWidth(380);
@@ -326,6 +372,19 @@ QWidget* MainWindow::buildResultsPanel(QWidget* parent) {
             &MainWindow::onRecsCheckedChanged);
     connect(m_cleanupButton, &QPushButton::clicked, this, &MainWindow::startCleanup);
     connect(m_tabs, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
+
+    // ---- Keyboard shortcuts ----
+    auto* findShortcut = new QShortcut(QKeySequence::Find, this);
+    connect(findShortcut, &QShortcut::activated, this, [this]() {
+        m_pathFilter->setFocus();
+        m_pathFilter->selectAll();
+    });
+    for (int i = 0; i < 3; ++i) {
+        auto* tabShortcut = new QShortcut(
+            QKeySequence(QStringLiteral("Ctrl+%1").arg(i + 1)), this);
+        connect(tabShortcut, &QShortcut::activated, this,
+                [this, i]() { m_tabs->setCurrentIndex(i); });
+    }
 
     return panel;
 }
@@ -364,11 +423,15 @@ void MainWindow::updateDashboardForDevice(const core::DeviceInfo* device) {
         m_cardFree->setValue(QStringLiteral("--"));
         return;
     }
-    m_cardTotal->setValue(bytes(device->totalBytes));
-    m_cardUsed->setValue(bytes(device->usedBytes));
-    m_cardFree->setValue(bytes(device->availableBytes));
+    m_cardTotal->setValue(formatting::bytes(device->totalBytes));
+    m_cardUsed->setValue(formatting::bytes(device->usedBytes));
+    m_cardFree->setValue(formatting::bytes(device->availableBytes));
     m_chart->setUsage(device->usedBytes, device->availableBytes,
                       QString::fromStdString(device->mountPoint));
+    m_chart->setToolTip(tr("%1 — %2 used, %3 free")
+                            .arg(QString::fromStdString(device->mountPoint),
+                                 formatting::bytes(device->usedBytes),
+                                 formatting::bytes(device->availableBytes)));
 }
 
 QString MainWindow::currentTarget() const {
@@ -403,10 +466,56 @@ void MainWindow::startScan() {
         return;
     }
 
+    // ---- Validate the target before starting any work ----
+    const QFileInfo info(target);
+    if (!info.exists()) {
+        QMessageBox::warning(
+            this, tr("Target unavailable"),
+            tr("The path does not exist:\n%1\n\nIt may have been unmounted or removed. "
+               "Reconnect the device and refresh the filesystem list, then try again.")
+                .arg(target));
+        return;
+    }
+    if (!info.isDir()) {
+        QMessageBox::warning(this, tr("Not a directory"),
+                             tr("%1 is not a directory.").arg(target));
+        return;
+    }
+    if (!info.isReadable()) {
+        QMessageBox::warning(
+            this, tr("Permission denied"),
+            tr("You do not have permission to read:\n%1\n\n"
+               "Scanning was not started. Try a folder you own.")
+                .arg(target));
+        return;
+    }
+
+    const core::DeviceInfo* device = selectedDevice();
+    if (device && device->isNetworkFs) {
+        const auto answer = QMessageBox::warning(
+            this, tr("Network filesystem"),
+            tr("%1 is a network filesystem (%2).\n\nScanning it can be slow and the "
+               "results may be inaccurate if the remote side changes while scanning. "
+               "Continue?")
+                .arg(target, QString::fromStdString(device->fsType)),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            return;
+        }
+    }
+
     m_cardRecoverable->setValue(QStringLiteral("..."));
     m_status->setText(tr("Scanning %1 ...").arg(target));
     setScanning(true);
     m_worker->start(target);
+}
+
+const core::DeviceInfo* MainWindow::selectedDevice() const {
+    if (!m_selectedFolder.isEmpty()) {
+        return nullptr;
+    }
+    const QModelIndex current = m_table->currentIndex();
+    return m_model->deviceAt(current.row());
 }
 
 void MainWindow::cancelScan() {
@@ -420,7 +529,7 @@ void MainWindow::onProgress(quint64 files, quint64 dirs, quint64 seenBytes) {
     m_status->setText(tr("Scanning... %1 files, %2 dirs, %3")
                           .arg(files)
                           .arg(dirs)
-                          .arg(bytes(seenBytes)));
+                          .arg(formatting::bytes(seenBytes)));
 }
 
 void MainWindow::onCompleted(quint64 filesScanned, quint64 dirsScanned, quint64 allocated,
@@ -436,11 +545,11 @@ void MainWindow::onCompleted(quint64 filesScanned, quint64 dirsScanned, quint64 
                           .arg(prefix)
                           .arg(filesScanned)
                           .arg(dirsScanned)
-                          .arg(bytes(uniqueAllocated))
+                          .arg(formatting::bytes(uniqueAllocated))
                           .arg(skippedCount)
                           .arg(durationMs));
 
-    m_cardRecoverable->setValue(bytes(recoverableBytes));
+    m_cardRecoverable->setValue(formatting::bytes(recoverableBytes));
     m_cardRecoverable->setAccent(true);
 
     const ScanDataPtr data = m_worker->result();
@@ -448,6 +557,11 @@ void MainWindow::onCompleted(quint64 filesScanned, quint64 dirsScanned, quint64 
     m_dirsModel->setData(data);
     m_recsModel->setData(data);
     applyFilters();
+
+    if (m_skippedAction) {
+        const std::size_t skippedRecorded = data ? data->result.skipped.size() : 0;
+        m_skippedAction->setEnabled(skippedRecorded > 0);
+    }
 
     m_tabs->setCurrentIndex(0);
     updateDetails();
@@ -469,6 +583,10 @@ void MainWindow::setScanning(bool scanning) {
     m_selectButton->setEnabled(!scanning);
     if (m_cleanupButton) {
         m_cleanupButton->setEnabled(!scanning && m_recsModel->checkedCount() > 0);
+    }
+    if (m_skippedAction) {
+        const ScanDataPtr data = m_worker->result();
+        m_skippedAction->setEnabled(!scanning && data && !data->result.skipped.empty());
     }
     if (scanning) {
         m_progress->setRange(0, 0); // busy indicator (no total estimate yet: G3)
@@ -496,10 +614,42 @@ void MainWindow::applyFilters() {
 
     updateDetails();
     updateRecsSummary();
+    updateEmptyState();
 }
 
 void MainWindow::onTabChanged() {
     updateDetails();
+    updateEmptyState();
+}
+
+void MainWindow::updateEmptyState() {
+    if (!m_resultsStack || !m_emptyStateLabel) {
+        return;
+    }
+    // Only replace the whole tab area when *every* tab is empty — otherwise the
+    // tab bar would become unreachable (a dead end for the user).
+    const bool hasData = m_filesModel && m_filesModel->data();
+    const bool anyRows = (m_filesModel && m_filesModel->rowCount() > 0) ||
+                         (m_dirsModel && m_dirsModel->rowCount() > 0) ||
+                         (m_recsModel && m_recsModel->rowCount() > 0);
+    if (anyRows) {
+        m_resultsStack->setCurrentWidget(m_tabs);
+        return;
+    }
+
+    QString text;
+    if (!hasData) {
+        text = tr("No scan results yet.\n\n"
+                  "Select a filesystem or folder and press Scan (F5) to fill this view.");
+    } else if (m_tabs && m_tabs->currentIndex() == 2) {
+        text = tr("No recommendations match the current scan and filters.\n\n"
+                  "Recommendations are conservative by design — widen the filters "
+                  "if you expected more.");
+    } else {
+        text = tr("No items match the current filters.");
+    }
+    m_emptyStateLabel->setText(text);
+    m_resultsStack->setCurrentWidget(m_emptyStateLabel);
 }
 
 void MainWindow::updateDetails() {
@@ -531,7 +681,7 @@ void MainWindow::updateRecsSummary() {
     const int count = m_recsModel->checkedCount();
     const std::uintmax_t recoverable = m_recsModel->checkedRecoverable();
     m_selectionSummary->setText(
-        tr("%1 selected — %2 recoverable").arg(count).arg(bytes(recoverable)));
+        tr("%1 selected — %2 recoverable").arg(count).arg(formatting::bytes(recoverable)));
     if (m_cleanupButton) {
         m_cleanupButton->setEnabled(count > 0 && !m_cancelButton->isEnabled());
     }
@@ -628,6 +778,15 @@ void MainWindow::openContainingFolder(const QString& path) {
     }
 }
 
+void MainWindow::showSkippedPaths() {
+    const ScanDataPtr data = m_worker->result();
+    if (!data) {
+        return;
+    }
+    SkippedPathsDialog dialog(data->result.skipped, data->result.stats.skippedCount, this);
+    dialog.exec();
+}
+
 void MainWindow::showAbout() {
     QMessageBox::about(
         this, tr("About Driverse"),
@@ -636,7 +795,10 @@ void MainWindow::showAbout() {
            "<p>Scanning never deletes anything. Recommendations are "
            "conservative, system paths are protected, and destructive actions "
            "always require explicit confirmation and a dry-run.</p>"
-           "<p>Version 1.0.0</p>"));
+           "<p style='color:#888'>Version 1.0.0 · Qt %1<br>"
+           "Audit log: %2</p>")
+            .arg(QString::fromLatin1(qVersion()),
+                 QString::fromStdString(utils::AuditLog::defaultPath().string())));
 }
 
 } // namespace driverse::gui

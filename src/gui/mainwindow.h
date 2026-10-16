@@ -8,6 +8,7 @@
 #include <array>
 #include <vector>
 
+class QAction;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -15,6 +16,7 @@ class QLabel;
 class QLineEdit;
 class QProgressBar;
 class QPushButton;
+class QStackedWidget;
 class QTabWidget;
 class QTableView;
 class QTextBrowser;
@@ -48,6 +50,7 @@ private slots:
                      quint64 recoverableBytes, bool cancelled);
     void onFailed(const QString& error);
     void showAbout();
+    void showSkippedPaths();
 
     void applyFilters();
     void onTabChanged();
@@ -71,6 +74,8 @@ private:
     void setScanning(bool scanning);
     void updateDashboardForDevice(const core::DeviceInfo* device);
     void updateRecsSummary();
+    void updateEmptyState();
+    const core::DeviceInfo* selectedDevice() const;
     QTableView* activeResultsView() const;
     ResultsTableModel* activeResultsModel() const;
     QString currentTarget() const;
@@ -91,6 +96,8 @@ private:
 
     // Results view
     QTabWidget* m_tabs = nullptr;
+    QStackedWidget* m_resultsStack = nullptr;
+    QLabel* m_emptyStateLabel = nullptr;
     QTableView* m_filesView = nullptr;
     QTableView* m_dirsView = nullptr;
     QTableView* m_recsView = nullptr;
@@ -113,6 +120,7 @@ private:
 
     QProgressBar* m_progress = nullptr;
     QLabel* m_status = nullptr;
+    QAction* m_skippedAction = nullptr;
 
     ScanWorker* m_worker = nullptr;
 

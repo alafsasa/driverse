@@ -2,6 +2,7 @@
 
 #include "types.h"
 #include <string>
+#include <system_error>
 #include <vector>
 #include <filesystem>
 
@@ -15,6 +16,11 @@ std::string formatDuration(std::chrono::milliseconds ms);
 
 // Human-readable message for an errno value (e.g. EACCES -> "Permission denied").
 std::string describeErrno(int err);
+
+// Friendly, actionable hint for common filesystem error codes (ENOSPC, EBUSY,
+// EROFS, EACCES, ...). Returns an empty string when there is nothing useful to
+// add beyond the error code's own message.
+std::string fsErrorHint(const std::error_code& ec);
 
 // Abbreviate a long path for logging by eliding the middle:
 //   /home/alice/very/long/.../file.txt  ->  "/home/alice/.../file.txt"
