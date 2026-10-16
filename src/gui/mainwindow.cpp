@@ -4,6 +4,7 @@
 #include "platform/mounts.h"
 
 #include "deviceTableModel.h"
+#include "cleanupdialog.h"
 #include "scanmodel.h"
 #include "scanworker.h"
 #include "storageChart.h"
@@ -286,6 +287,10 @@ QWidget* MainWindow::buildResultsPanel(QWidget* parent) {
     recsBar->addStretch(1);
     m_selectionSummary = new QLabel(tr("0 selected"), recsTab);
     recsBar->addWidget(m_selectionSummary);
+    m_cleanupButton = new QPushButton(tr("Clean up selected…"), recsTab);
+    m_cleanupButton->setEnabled(false);
+    m_cleanupButton->setToolTip(tr("Preview and clean up the checked recommendations"));
+    recsBar->addWidget(m_cleanupButton);
     recsLayout->addLayout(recsBar);
 
     m_recsView = buildResultsView(recsTab, m_recsModel);
@@ -319,6 +324,7 @@ QWidget* MainWindow::buildResultsPanel(QWidget* parent) {
     connect(clearSel, &QPushButton::clicked, this, &MainWindow::clearRecommendations);
     connect(m_recsModel, &ResultsTableModel::checkedChanged, this,
             &MainWindow::onRecsCheckedChanged);
+    connect(m_cleanupButton, &QPushButton::clicked, this, &MainWindow::startCleanup);
     connect(m_tabs, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
 
     return panel;
@@ -461,6 +467,9 @@ void MainWindow::setScanning(bool scanning) {
     m_scanButton->setEnabled(!scanning && !currentTarget().isEmpty());
     m_cancelButton->setEnabled(scanning);
     m_selectButton->setEnabled(!scanning);
+    if (m_cleanupButton) {
+        m_cleanupButton->setEnabled(!scanning && m_recsModel->checkedCount() > 0);
+    }
     if (scanning) {
         m_progress->setRange(0, 0); // busy indicator (no total estimate yet: G3)
         m_progress->setValue(0);
@@ -523,6 +532,28 @@ void MainWindow::updateRecsSummary() {
     const std::uintmax_t recoverable = m_recsModel->checkedRecoverable();
     m_selectionSummary->setText(
         tr("%1 selected — %2 recoverable").arg(count).arg(bytes(recoverable)));
+    if (m_cleanupButton) {
+        m_cleanupButton->setEnabled(count > 0 && !m_cancelButton->isEnabled());
+    }
+}
+
+void MainWindow::startCleanup() {
+    if (!m_recsModel) {
+        return;
+    }
+    std::vector<core::CleanupCandidate> candidates = m_recsModel->checkedCandidates();
+    if (candidates.empty()) {
+        return;
+    }
+
+    CleanupDialog dialog(std::move(candidates), this);
+    dialog.exec();
+
+    if (dialog.applied()) {
+        // Results on disk changed; refresh so nothing is deleted twice.
+        m_status->setText(tr("Cleanup applied — rescanning to refresh results"));
+        startScan();
+    }
 }
 
 void MainWindow::selectRiskGroup() {

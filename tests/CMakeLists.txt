@@ -20,6 +20,14 @@ add_executable(test_recommendations core/test_recommendations.cpp)
 target_link_libraries(test_recommendations PRIVATE driverse_core)
 add_test(NAME recommendations COMMAND test_recommendations)
 
+add_executable(test_cleanup core/test_cleanup.cpp)
+target_link_libraries(test_cleanup PRIVATE driverse_core)
+add_test(NAME cleanup COMMAND test_cleanup)
+
+add_executable(test_trash platform/test_trash.cpp)
+target_link_libraries(test_trash PRIVATE driverse_core)
+add_test(NAME trash COMMAND test_trash)
+
 add_executable(test_config utils/test_config.cpp)
 target_link_libraries(test_config PRIVATE driverse_core)
 add_test(NAME config COMMAND test_config)
@@ -27,6 +35,10 @@ add_test(NAME config COMMAND test_config)
 add_executable(test_audit utils/test_audit.cpp)
 target_link_libraries(test_audit PRIVATE driverse_core)
 add_test(NAME audit COMMAND test_audit)
+
+add_executable(test_cleanupaudit utils/test_cleanupaudit.cpp)
+target_link_libraries(test_cleanupaudit PRIVATE driverse_core)
+add_test(NAME cleanupaudit COMMAND test_cleanupaudit)
 
 add_executable(test_integration utils/test_integration.cpp)
 target_link_libraries(test_integration PRIVATE driverse_core)
@@ -62,6 +74,15 @@ add_executable(test_scanworker
 )
 target_link_libraries(test_scanworker PRIVATE driverse_core Qt6::Core Qt6::Concurrent)
 add_test(NAME scanworker COMMAND test_scanworker)
+
+add_executable(test_cleanupdialog
+    gui/test_cleanupdialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/cleanupdialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/cleanupdialog.h
+)
+target_link_libraries(test_cleanupdialog PRIVATE driverse_core Qt6::Widgets)
+add_test(NAME cleanupdialog COMMAND test_cleanupdialog)
+set_tests_properties(cleanupdialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # The bind-mount cycle guard (G1) can only be exercised with mount privileges.
 # If unprivileged user+mount namespaces are available, re-run the scanner suite

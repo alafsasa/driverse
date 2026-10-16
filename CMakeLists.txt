@@ -38,9 +38,12 @@ add_library(driverse_core STATIC
     src/core/protections.cpp
     src/core/scanner.cpp
     src/core/recommendations.cpp
+    src/core/cleanup.cpp
     src/platform/mounts.cpp
+    src/platform/trash.cpp
     src/utils/config.cpp
     src/utils/audit.cpp
+    src/utils/cleanupaudit.cpp
     src/utils/integration.cpp
     src/utils/logger.cpp
 )
@@ -63,6 +66,8 @@ add_executable(driverse
     src/gui/scanmodel.cpp
     src/gui/scanmodel.h
     src/gui/scandata.h
+    src/gui/cleanupdialog.cpp
+    src/gui/cleanupdialog.h
 )
 target_link_libraries(driverse PRIVATE
     driverse_core

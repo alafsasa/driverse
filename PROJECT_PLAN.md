@@ -14,7 +14,7 @@ This document outlines the complete project plan for building Driverse, a safe a
 
 ## Status Snapshot
 
-_Last updated: 2026-10-15_
+_Last updated: 2026-10-16_
 
 | Phase | Title | Status |
 |---|---|---|
@@ -24,24 +24,29 @@ _Last updated: 2026-10-15_
 | 3 | Filesystem Scanner Implementation | ✅ Complete |
 | 4 | Device Discovery & Dashboard Data | ✅ Complete (data layer) |
 | 5 | Cleanup Recommendation Engine | ✅ Complete |
-| 6 | Application Storage Analysis | ⬜ Pending |
+| 6 | Application Storage Analysis | ⬜ Pending (optional) |
 | 7 | Core Logic Integration & Utilities | ✅ Complete |
 | 8 | Qt GUI - Dashboard & Device Selection | ✅ Complete |
 | 9 | Results View - Files, Dirs, & Recommendations | ✅ Complete |
-| 10 | Cleanup Workflow (Dry-Run, Confirm, Execute) | ⬜ Next |
-| 11 | Polish, Error Handling & Edge Cases | ⬜ Pending |
+| 10 | Cleanup Workflow (Dry-Run, Confirm, Execute) | ✅ Complete |
+| 11 | Polish, Error Handling & Edge Cases | ⬜ Next |
 | 12 | Testing, Documentation & Packaging | ⬜ Pending |
 
 **What exists today:** buildable C++20/Qt6/CMake project; core static library
 (`driverse_core`) with types, utilities, protections, mount detection, a
-hard-link-aware, bind-mount-cycle-safe filesystem scanner, and a conservative
-cleanup recommendation engine; a cross-cutting `src/utils/` module (INI config,
-JSONL audit log, leveled logger, config→core integration); and a `src/gui/`
-dashboard (device table, usage donut, summary cards, background cancellable
-scans) with a filterable/sortable results view (largest files, largest
-directories, and checkable recommendations) plus a details panel. CTest suite
-(types, utils, mounts, scanner, scanner_userns, recommendations, config, audit,
-integration, logger, devicetablemodel, scanmodel, scanworker) all passing with
+hard-link-aware, bind-mount-cycle-safe filesystem scanner, a conservative
+cleanup recommendation engine, and the guarded cleanup executor (`buildCleanupPlan`
+/ `executeCleanup`) plus a dependency-free XDG Trash implementation; a
+cross-cutting `src/utils/` module (INI config, JSONL audit log, cleanup→audit
+bridge, leveled logger, config→core integration); and a `src/gui/` dashboard
+(device table, usage donut, summary cards, background cancellable scans) with a
+filterable/sortable results view (largest files, largest directories, and
+checkable recommendations), a details panel, and the cleanup workflow dialog
+(plan summary + risk breakdown, item review table, risk-based confirmation
+gates, dry run, apply with trash-first + opt-in permanent delete for Safe
+caches). CTest suite (types, utils, mounts, scanner, scanner_userns,
+recommendations, cleanup, trash, config, audit, cleanupaudit, integration,
+logger, devicetablemodel, scanmodel, scanworker, cleanupdialog) all passing with
 zero compiler warnings.
 
 ## Architecture Goals
@@ -63,12 +68,15 @@ driverse/
 │   │   ├── utils.h/.cpp        # formatting, path protection, fs classification
 │   │   ├── protections.h/.cpp  # protected/sensitive path registry
 │   │   ├── scanner.h/.cpp      # thread-confined filesystem scanner
-│   │   └── recommendations.h/.cpp  # conservative cleanup classifier
+│   │   ├── recommendations.h/.cpp  # conservative cleanup classifier
+│   │   └── cleanup.h/.cpp      # plan/execute: TOCTOU checks, trash-first, reports
 │   ├── platform/           # Linux-specific: mounts, package managers, trash
-│   │   └── mounts.h/.cpp       # /proc mount discovery + statvfs capacity
+│   │   ├── mounts.h/.cpp       # /proc mount discovery + statvfs capacity
+│   │   └── trash.h/.cpp        # XDG Trash spec implementation (recoverable moves)
 │   ├── utils/              # cross-cutting: config, audit, logging, integration
 │   │   ├── config.h/.cpp       # INI config (XDG-aware)
 │   │   ├── audit.h/.cpp        # append-only JSONL audit log
+│   │   ├── cleanupaudit.h/.cpp # CleanupPlan/Report -> audit entries bridge
 │   │   ├── logger.h/.cpp       # leveled logger (console + file sink)
 │   │   └── integration.h/.cpp  # Config -> core options bridge
 │   ├── gui/                # Qt UI: dashboard, results view, scan worker
@@ -78,6 +86,7 @@ driverse/
 │   │   ├── scandata.h               # immutable per-scan snapshot (shared_ptr)
 │   │   ├── storageChart.h/.cpp      # custom QPainter usage donut
 │   │   ├── summaryCard.h/.cpp       # dashboard summary card widget
+│   │   ├── cleanupdialog.h/.cpp     # dry-run preview + confirmation gates + apply
 │   │   └── scanworker.h/.cpp        # QtConcurrent scan + queued signals
 │   └── main.cpp            # Qt application entry point
 ├── tests/                  # CTest suites (core/*, utils/*, gui/*)
@@ -593,49 +602,49 @@ driverse/
 **Goal:** Implement safe cleanup with mandatory dry-run and confirmations.  
 **Priority:** **CRITICAL** (Safety)  
 **Duration:** 1-2 days  
-**Status:** Pending
+**Status:** ✅ Complete (2026-10-16)
 
 ### Deliverables
-- [ ] Dry-run preview dialog
-- [ ] Risk-based confirmation system
-- [ ] Cleanup executor (non-destructive simulation first)
-- [ ] Trash integration (user files)
-- [ ] Audit logging of all actions
-- [ ] Error handling & partial results
+- [x] Dry-run preview dialog
+- [x] Risk-based confirmation system
+- [x] Cleanup executor (non-destructive simulation first)
+- [x] Trash integration (user files)
+- [x] Audit logging of all actions
+- [x] Error handling & partial results
 
 ### Tasks
 1. **Dry-run enforcement**
-   - [ ] All operations start as dry-run
-   - [ ] Preview shows: count, total est. freed, risk breakdown, top items
-   - [ ] Must confirm each risk group or overall
-   - [ ] Compare against protected paths (re-validate)
+   - [x] All operations start as dry-run
+   - [x] Preview shows: count, total est. freed, risk breakdown, top items
+   - [x] Must confirm each risk group or overall
+   - [x] Compare against protected paths (re-validate)
 
 2. **Confirmation UI**
-   - [ ] For `Safe`/`Low`: checkbox confirmation
-   - [ ] For `Medium`: stronger confirmation + "I understand" checkbox
-   - [ ] For `High`: require explicit checkbox + list review
-   - [ ] For `SystemProtected`: never allow
-   - [ ] Option to "Review selected" before proceeding
-   - [ ] Type-to-confirm for High risk if root-owned paths selected
+   - [x] For `Safe`/`Low`: checkbox confirmation
+   - [x] For `Medium`: stronger confirmation + "I understand" checkbox
+   - [x] For `High`: require explicit checkbox + list review
+   - [x] For `SystemProtected`: never allow
+   - [x] Option to "Review selected" before proceeding
+   - [x] Type-to-confirm for High risk if root-owned paths selected
 
 3. **Cleanup execution** (`src/platform/trash.*`, `src/core/cleanup.*`)
-   - [ ] Prefer XDG Trash: move user-owned files to trash (`gio trash`, `trash-put`, or manual XDG spec)
-   - [ ] For regenerable caches in safe locations, allow permanent delete ONLY if explicitly opted-in AND classified Safe
-   - [ ] Never delete if path became protected between preview and exec (recheck)
-   - [ ] Never follow symlinks
-   - [ ] Handle directories: remove empty dirs only if safe and user-approved
-   - [ ] Atomic-ish batch: process in order, log each
-   - [ ] Track success/failure/skipped
+   - [x] Prefer XDG Trash: move user-owned files to trash (`gio trash`, `trash-put`, or manual XDG spec)
+   - [x] For regenerable caches in safe locations, allow permanent delete ONLY if explicitly opted-in AND classified Safe
+   - [x] Never delete if path became protected between preview and exec (recheck)
+   - [x] Never follow symlinks
+   - [x] Handle directories: remove empty dirs only if safe and user-approved
+   - [x] Atomic-ish batch: process in order, log each
+   - [x] Track success/failure/skipped
 
 4. **TOCTOU safety**
-   - [ ] Snapshot (path, dev, ino, size) at preview time
-   - [ ] On delete: verify still exists, same inode/dev (where possible), size not drastically changed?
-   - [ ] If drift detected: warn, skip or abort batch
-   - [ ] Abort entire batch on critical mismatch
+   - [x] Snapshot (path, dev, ino, size) at preview time
+   - [x] On delete: verify still exists, same inode/dev (where possible), size not drastically changed?
+   - [x] If drift detected: warn, skip or abort batch
+   - [x] Abort entire batch on critical mismatch
 
 5. **Audit trail**
-   - [ ] Log: `{"ts":..., "action":"cleanup", "mode":"dryrun|apply", "user":..., "items":[...], "total_freed":..., "result":"ok|partial|failed", "errors":[]}`
-   - [ ] Write to audit log before and after
+   - [x] Log: `{"ts":..., "action":"cleanup", "mode":"dryrun|apply", "user":..., "items":[...], "total_freed":..., "result":"ok|partial|failed", "errors":[]}`
+   - [x] Write to audit log before and after
 
 ### Acceptance Criteria
 - Dry-run is mandatory (no direct delete without preview)
@@ -645,6 +654,56 @@ driverse/
 - TOCTOU check prevents deleting wrong file on mismatch
 - Audit log complete
 - Partial failures reported clearly
+
+### Delivered (2026-10-16)
+- **`src/platform/trash.{h,cpp}`** — dependency-free XDG Trash implementation:
+  `files/` + `info/` layout, percent-encoded `Path=` record, `DeletionDate`,
+  collision-safe names (`name.1`, `name.2`, …), rename-first with a
+  copy+remove fallback across filesystems, and symlinks moved as links (targets
+  never followed). The `.trashinfo` record is written *before* the move, so a
+  partial failure cannot leave an untracked file in the trash. Deviation from
+  the spec: the per-topdir `.Trash-<uid>` variant is not implemented; cross-device
+  moves are copied into the home trash instead (still recoverable).
+- **`src/core/cleanup.{h,cpp}`** — `buildCleanupPlan()` snapshots each candidate
+  (dev, ino, logical size, type, owner via `lstat`) and assigns `MoveToTrash`,
+  `PermanentDelete`, or `Skip` (+reason) with risk/byte aggregation.
+  Hard guards: `SystemProtected` and protected paths rejected; non-user-owned
+  items refused (needs root); "/", home, and any ancestor of home refused even
+  if a bad candidate reaches the plan. `executeCleanup()` re-validates protected
+  paths, re-checks `(dev, ino, type)` identity (TOCTOU) and — by default —
+  aborts the whole batch on a mismatch (`abortOnDrift = false` → skip the item);
+  size drift is reported as a note. Reports track `MovedToTrash` (recoverable,
+  bytes still on disk) separately from `Deleted` (actually reclaimed), plus
+  skipped/failed counts, abort reason, and duration. Dry-run mode touches
+  nothing and returns the same report shape.
+- **`src/utils/cleanupaudit.{h,cpp}`** — maps plan/report onto `AuditEntry`:
+  "begin" record before an apply (`result=planned`), preview record for dry runs
+  (`action=preview`), and a result record after execution with per-item
+  `trashed|deleted|skipped|failed|dry-run` and aggregated errors.
+- **`src/gui/cleanupdialog.{h,cpp}`** — "Clean up selected…" in the
+  Recommendations tab opens a preview: plan summary (count, estimated
+  recoverable, per-risk breakdown, planned trash/delete split), a review table
+  (riskiest/largest first, skipped items shown with reasons), warning banner,
+  then the confirmation gates: acknowledgement checkbox (always), "I have
+  reviewed the high risk items" (High only), permanent-delete opt-in (only when
+  eligible Safe+regenerable items exist) which forces typing `DELETE` (also
+  required for High risk). **Apply is refused unless the audit "before" record
+  is written successfully** — no unaudited destructive action. A modal
+  Yes/No warning is the final gate. Buttons: Dry run / Apply / Close.
+- **Selection wiring** — `MainWindow` enables the button only with ≥1 checked
+  candidate and not while scanning; after a successful apply it rescans to
+  refresh results.
+- **Tests (17 suites total)** — `test_trash` (move file/dir/symlink, collision
+  naming, encoding, missing path), `test_cleanup` (plan decisions, opt-in
+  gating, ownership rule, dangerous roots, dry run touches nothing, trash apply,
+  TOCTOU abort/skip, protected re-check, status strings), `test_cleanupaudit`
+  (begin/preview/apply/aborted entries, JSON round-trip), `test_cleanupdialog`
+  (pure gate functions + dialog gating, end-to-end apply with redirected
+  `XDG_DATA_HOME` asserting the trash contents and the two audit records, and
+  the audit-unwritable refusal).
+- **Notes for later:** execution is synchronous (no progress dialog/cancel
+  mid-batch); directories trash/move as a whole (no per-file empty-dir sweep);
+  `remove_all` for opted-in directory deletion does not follow symlinks.
 
 ---
 
@@ -842,20 +901,34 @@ Open:
   path via context menu, double-click). `ScanWorker` now hands the full result to
   the views. New tests `test_scanmodel` and `test_scanworker` (real background
   scan → snapshot). 13/13 tests pass, zero warnings, app smoke-tested headless.
+- **2026-10-16** — Phase 10 cleanup workflow (safety-critical):
+  `src/platform/trash.*` (XDG Trash, recoverable, symlink-safe),
+  `src/core/cleanup.*` (plan + TOCTOU-verified executor, trash-first, opt-in
+  permanent delete for Safe regenerable caches, repeated protected-path checks,
+  home/root hard guards, partial-failure reporting), `src/utils/cleanupaudit.*`
+  (before/after audit records), and `src/gui/cleanupdialog.*` ("Clean up
+  selected…" preview with risk breakdown, review table, acknowledgement /
+  high-risk / type-to-confirm gates, dry run + apply). Apply refuses to run when
+  the audit log cannot be written. The app is no longer read-only: it can move
+  user cache candidates to the trash after explicit confirmation. New tests
+  `test_trash`, `test_cleanup`, `test_cleanupaudit`, `test_cleanupdialog`
+  (end-to-end apply with redirected `XDG_DATA_HOME`). 17/17 tests pass, zero
+  warnings, app smoke-tested headless.
 
 ---
 
 ## Next Steps
 
-Core through the results view (Phases 0–5, 7, 8, 9) is done and tested. The app
-can scan a filesystem or folder on a background thread and present the largest
-files, largest directories, and conservative, risk-classified recommendations
-with filtering, sorting, a details panel, and path actions.
+Phases 0–5 and 7–10 are done and tested. The app can scan a filesystem or folder
+on a background thread, present the largest files, largest directories, and
+conservative risk-classified recommendations with filtering, sorting, a details
+panel, and path actions, and — after an explicit dry-run-style review — move
+selected candidates to the XDG Trash (or permanently delete opted-in Safe
+caches), recording every action in the audit log.
 
-Next is **Phase 10: Cleanup Workflow** (safety-critical) — dry-run preview,
-risk-based confirmation, execution with XDG Trash for user files, and audit
-logging. Everything is still read-only: the Recommendations tab only *selects*
-candidates; nothing is removed yet.
+Next is **Phase 11: Polish, Error Handling & Edge Cases** — skipped-paths
+dialog, empty states, locale-aware formatting, ENOSPC/EBUSY/EROFS/unmounted/
+network handling, and a safety review of the cleanup path.
 
 Q1 is resolved: the donut is a custom `QPainter` widget (no `qt6-charts`
 dependency), so the build stays reproducible. If you later install

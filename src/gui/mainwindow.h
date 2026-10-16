@@ -56,6 +56,7 @@ private slots:
     void selectRiskGroup();
     void selectAllRecommendations();
     void clearRecommendations();
+    void startCleanup();
 
 private:
     void buildMenus();
@@ -108,6 +109,7 @@ private:
     // Recommendation selection controls
     QComboBox* m_groupCombo = nullptr;
     QLabel* m_selectionSummary = nullptr;
+    QPushButton* m_cleanupButton = nullptr;
 
     QProgressBar* m_progress = nullptr;
     QLabel* m_status = nullptr;
