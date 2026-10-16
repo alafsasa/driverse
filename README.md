@@ -125,9 +125,10 @@ executor (in addition to the built-in denylist).
 6. **Audit** — previews, applies, and failures are appended to
    `audit.jsonl` (machine-parseable JSON Lines).
 
-See [USER_GUIDE.md](USER_GUIDE.md) for a walk-through and
-[PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap, known gaps, and
-technical design notes.
+Additional documentation ships with the source tree (kept out of the
+repository): `USER_GUIDE.md` for a usage walk-through, `PROJECT_PLAN.md` for the
+roadmap, known gaps, and technical design notes, `CONTRIBUTING.md` for
+development rules, and `docs/MANUAL_TEST_CHECKLIST.md` for release checks.
 
 ## Packaging
 
