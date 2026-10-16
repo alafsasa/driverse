@@ -24,6 +24,10 @@ add_executable(test_cleanup core/test_cleanup.cpp)
 target_link_libraries(test_cleanup PRIVATE driverse_core)
 add_test(NAME cleanup COMMAND test_cleanup)
 
+add_executable(test_safety_scenarios core/test_safety_scenarios.cpp)
+target_link_libraries(test_safety_scenarios PRIVATE driverse_core)
+add_test(NAME safety_scenarios COMMAND test_safety_scenarios)
+
 add_executable(test_trash platform/test_trash.cpp)
 target_link_libraries(test_trash PRIVATE driverse_core)
 add_test(NAME trash COMMAND test_trash)

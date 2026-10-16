@@ -79,6 +79,16 @@ target_link_libraries(driverse PRIVATE
 )
 
 install(TARGETS driverse DESTINATION bin)
+install(FILES data/driverse.desktop DESTINATION share/applications)
+install(FILES data/driverse.svg DESTINATION share/icons/hicolor/scalable/apps)
+
+# ---- Packaging (optional; `cpack` in the build dir produces a tarball) ----
+set(CPACK_PACKAGE_NAME "driverse")
+set(CPACK_PACKAGE_VENDOR "Driverse")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Safe, conservative Linux storage cleaner")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_GENERATOR "TGZ")
+include(CPack)
 
 # ---- Tests ----
 option(DRIVERSE_BUILD_TESTS "Build tests" ON)

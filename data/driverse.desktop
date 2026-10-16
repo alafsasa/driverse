@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Driverse
+GenericName=Storage Cleaner
+Comment=Safely find and reclaim disk space
+Exec=driverse
+Icon=driverse
+Terminal=false
+Categories=Utility;System;Filesystem;
+Keywords=storage;disk;cleanup;space;cache;trash;
+StartupNotify=true

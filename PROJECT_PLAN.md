@@ -30,7 +30,7 @@ _Last updated: 2026-10-16_
 | 9 | Results View - Files, Dirs, & Recommendations | ✅ Complete |
 | 10 | Cleanup Workflow (Dry-Run, Confirm, Execute) | ✅ Complete |
 | 11 | Polish, Error Handling & Edge Cases | ✅ Complete (2026-10-16) |
-| 12 | Testing, Documentation & Packaging | ⬜ Next |
+| 12 | Testing, Documentation & Packaging | ✅ Complete (2026-10-16) |
 
 **What exists today:** buildable C++20/Qt6/CMake project; core static library
 (`driverse_core`) with types, utilities, protections, mount detection, a
@@ -49,11 +49,15 @@ caches). Phase 11 added the polish layer: scan-target validation
 actionable ENOSPC/EBUSY/EROFS/EACCES error hints in cleanup + trash, a
 skipped-paths dialog, empty-state messages per tab, keyboard shortcuts
 (Ctrl+F, Ctrl+1/2/3), tooltips/help text, locale-aware size and date formatting,
-and a single shared risk-colour palette. CTest suite (19 targets: types, utils,
-mounts, scanner, scanner_userns, recommendations, cleanup, trash, config, audit,
+and a single shared risk-colour palette. Phase 12 added the end-to-end safety
+scenario suite, documentation (README, USER_GUIDE, CONTRIBUTING, manual test
+checklist), and packaging (`.desktop` entry, scalable icon, install rules, and a
+CPack tarball). CTest suite (20 targets: types, utils, mounts, scanner,
+scanner_userns, recommendations, cleanup, safety_scenarios, trash, config, audit,
 cleanupaudit, integration, logger, devicetablemodel, scanmodel, scanworker,
 cleanupdialog, skippedpathsdialog, formatting) all passing with zero compiler
-warnings.
+warnings. All planned phases are complete; Phase 6 (application storage
+analysis) remains optional and unstarted.
 
 ## Architecture Goals
 
@@ -794,52 +798,73 @@ driverse/
 ## Phase 12: Testing, Documentation & Packaging
 **Goal:** Comprehensive testing and user documentation.  
 **Duration:** 1-2 days  
-**Status:** Pending
+**Status:** ✅ Complete (2026-10-16)
 
 ### Deliverables
-- [ ] Unit tests (core logic)
-- [ ] Integration tests (safety scenarios)
-- [ ] Manual test checklist
-- [ ] README.md (updated)
-- [ ] USER_GUIDE.md
-- [ ] CONTRIBUTING.md
-- [ ] Basic packaging (AppImage or .desktop + binary)
+- [x] Unit tests (core logic)
+- [x] Integration tests (safety scenarios)
+- [x] Manual test checklist
+- [x] README.md (updated)
+- [x] USER_GUIDE.md
+- [x] CONTRIBUTING.md
+- [x] Basic packaging (AppImage or .desktop + binary)
 
 ### Tasks
 1. **Unit tests** (Catch2 or Qt Test)
-   - [ ] Mount parsing
-   - [ ] Path protection
-   - [ ] Risk classification
-   - [ ] Hard link dedup
-   - [ ] Size calculations
-   - [ ] Recommendation rules
+   - [x] Mount parsing
+   - [x] Path protection
+   - [x] Risk classification
+   - [x] Hard link dedup
+   - [x] Size calculations
+   - [x] Recommendation rules
 
 2. **Integration/safety tests**
-   - [ ] Scan temp tree with hard links, symlinks, sparse files
-   - [ ] Dry-run never deletes
-   - [ ] Protected paths blocked
-   - [ ] Cross-filesystem handling
-   - [ ] TOCTOU detection
-   - [ ] Trash vs permanent delete
+   - [x] Scan temp tree with hard links, symlinks, sparse files
+   - [x] Dry-run never deletes
+   - [x] Protected paths blocked
+   - [x] Cross-filesystem handling (covered by scanner suites; one-FS boundary)
+   - [x] TOCTOU detection
+   - [x] Trash vs permanent delete
 
 3. **Documentation**
-   - [ ] Update README.md with build/run instructions
+   - [x] Update README.md with build/run instructions
    - [ ] Add screenshots (future)
-   - [ ] Safety notes prominently
-   - [ ] Explain "estimates", logical vs allocated
-   - [ ] Warn about system dirs
+   - [x] Safety notes prominently
+   - [x] Explain "estimates", logical vs allocated
+   - [x] Warn about system dirs
 
 4. **Packaging**
-   - [ ] `.desktop` file
-   - [ ] App icon placeholder
-   - [ ] Build instructions for distros
-   - [ ] Optional: CPack config
+   - [x] `.desktop` file
+   - [x] App icon placeholder
+   - [x] Build instructions for distros
+   - [x] Optional: CPack config
 
 ### Acceptance Criteria
-- All unit tests pass
-- Safety tests pass
-- Build instructions clear
-- Documentation accurate
+- All unit tests pass ✅
+- Safety tests pass ✅
+- Build instructions clear ✅
+- Documentation accurate ✅
+
+### Delivered (2026-10-16)
+- **`tests/core/test_safety_scenarios.cpp`** — end-to-end pipeline suite on a
+  fake home tree (thumbnail cache, generic app cache, Downloads, a hard-linked
+  pair, a sparse file, a symlink to a sibling directory): scan never follows the
+  symlink, hard links deduplicate, sparse detection works, thumbnails classify
+  Safe, Downloads classify High with no permanent-delete, dry run touches
+  nothing, protected (`..`-containing) candidates are blocked at plan time,
+  trash-apply is recoverable with a `.trashinfo` record, opted-in permanent
+  delete removes only the Safe cache, and a substituted file aborts the batch.
+- **Documentation** — README rewritten (features, safety model, data/config
+  locations, packaging); `USER_GUIDE.md` (dashboard, scanning, recommendations,
+  cleanup gates, audit log, config, troubleshooting); `CONTRIBUTING.md` (build,
+  safety invariants for changes, style, testing, commit conventions);
+  `docs/MANUAL_TEST_CHECKLIST.md` (release checklist incl. destructive-path
+  drills).
+- **Packaging** — `data/driverse.desktop` + `data/driverse.svg` (scalable icon,
+  no theme dependency), install rules for binary/desktop/icon, window icon via
+  `QIcon::fromTheme`, and a minimal CPack config (`cpack` → TGZ; verified
+  `cmake --install` places all three artifacts). AppImage/DEB remain future
+  work.
 
 ---
 
@@ -967,25 +992,40 @@ Open:
   New tests `test_skippedpathsdialog`, `test_formatting`, extended `test_utils`,
   `test_cleanup`, `test_scanworker`. 19/19 tests pass, zero warnings, app
   smoke-tested headless.
+- **2026-10-16** — Phase 12 testing, documentation & packaging:
+  `tests/core/test_safety_scenarios.cpp` (scan → recommend → plan → dry-run →
+  apply end-to-end on a fake home with hard links, sparse file, out-of-tree
+  symlink, protected `..` path and TOCTOU substitution); README rewritten;
+  `USER_GUIDE.md`, `CONTRIBUTING.md`, `docs/MANUAL_TEST_CHECKLIST.md` added;
+  `data/driverse.desktop` + `data/driverse.svg` with install rules and a CPack
+  TGZ package (`cpack` + `cmake --install` verified). 20/20 tests pass, zero
+  warnings, app smoke-tested headless.
 
 ---
 
 ## Next Steps
 
-Phases 0–5 and 7–11 are done and tested. The app can scan a filesystem or folder
-on a background thread, present the largest files, largest directories, and
-conservative risk-classified recommendations with filtering, sorting, a details
-panel, empty states, and path actions, and — after an explicit dry-run-style
-review — move selected candidates to the XDG Trash (or permanently delete
-opted-in Safe caches), recording every action in the audit log. Failures carry
-actionable hints (disk full, busy, read-only, ...), skipped paths are explained
-in a dialog, and risky targets (network mounts, unmounted paths) are surfaced
-before the scan starts.
+**All planned phases (0–5, 7–12) are complete and tested.** The app can scan a
+filesystem or folder on a background thread, present the largest files, largest
+directories, and conservative risk-classified recommendations with filtering,
+sorting, a details panel, empty states, and path actions, and — after an
+explicit dry-run-style review — move selected candidates to the XDG Trash (or
+permanently delete opted-in Safe caches), recording every action in the audit
+log. Failures carry actionable hints, skipped paths are explained in a dialog,
+and risky targets (network mounts, unmounted paths) are surfaced before the scan
+starts. Documentation (README, user guide, contributing, manual checklist) and
+basic packaging (desktop entry, icon, CPack tarball) are in place.
 
-Next is **Phase 12: Testing, Documentation & Packaging** — README/USER_GUIDE,
-safety notes, a manual test checklist, `.desktop` file + icon placeholder, and
-optional CPack packaging. Phase 6 (application storage analysis via package
-managers, query-only) remains optional and can slot in after packaging.
+Remaining optional work, roughly in value order:
+
+1. **Phase 6 — application storage analysis** (query-only dpkg/pacman/Flatpak
+   integration; never calls package managers to remove anything).
+2. **Known gaps:** G2 (physical-device/removable classification via sysfs),
+   G3 (scan total estimate/ETA), G4 (stronger sensitive-path warnings), G5
+   (explicit Flatpak/Snap cache rules).
+3. **Packaging:** AppImage and/or DEB, plus choosing a license.
+4. **UX:** screenshots for the README, in-progress cleanup dialog with cancel
+   (execution is currently synchronous per batch).
 
 Q1 is resolved: the donut is a custom `QPainter` widget (no `qt6-charts`
 dependency), so the build stays reproducible. If you later install

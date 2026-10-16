@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>Driverse</title>
+  <!-- Usage donut: used (orange) vs free (dark), echoing the dashboard chart. -->
+  <circle cx="64" cy="64" r="48" fill="none" stroke="#2b2b31" stroke-width="18"/>
+  <circle cx="64" cy="64" r="48" fill="none" stroke="#e0842d" stroke-width="18"
+          stroke-dasharray="211.1 90.5"
+          stroke-dashoffset="0"
+          transform="rotate(-90 64 64)"
+          stroke-linecap="butt"/>
+  <circle cx="64" cy="64" r="24" fill="#2b2b31"/>
+  <path d="M56 70 L70 46" stroke="#e0842d" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <circle cx="56" cy="78" r="5" fill="#e0842d"/>
+  <circle cx="72" cy="70" r="4" fill="#8a8a92"/>
+</svg>

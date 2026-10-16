@@ -6,6 +6,7 @@
 #include "utils/logger.h"
 
 #include <QApplication>
+#include <QIcon>
 
 #include <cstdlib>
 
@@ -14,6 +15,7 @@ int main(int argc, char* argv[]) {
     app.setApplicationName(QStringLiteral("Driverse"));
     app.setApplicationVersion(QStringLiteral("1.0.0"));
     app.setOrganizationName(QStringLiteral("driverse"));
+    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("driverse")));
 
     // Load user config (falls back to built-in defaults) and apply custom
     // protected paths so the UI and scanner honour them.
