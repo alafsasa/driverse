@@ -2,7 +2,9 @@
 driverse_linux_storage_cleaner_requirements.pdf
 
 # Markdown documentation: kept locally only, never committed/uploaded
+# (README is the exception — it is the public face of the repository)
 *.md
+!README.md
 
 # Build output
 build/
