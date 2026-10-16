@@ -1,6 +1,9 @@
 # Requirements source doc (regenerated externally)
 driverse_linux_storage_cleaner_requirements.pdf
 
+# Markdown documentation: kept locally only, never committed/uploaded
+*.md
+
 # Build output
 build/
 cmake-build-*/
