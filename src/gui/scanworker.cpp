@@ -50,7 +50,9 @@ void ScanWorker::start(const QString& root) {
     m_scanner.setProgressCallback([this](const core::ScanProgress& p) {
         emit progressChanged(static_cast<quint64>(p.filesScanned),
                              static_cast<quint64>(p.dirsScanned),
-                             static_cast<quint64>(p.bytesSeen));
+                             static_cast<quint64>(p.bytesSeen),
+                             QString::fromStdString(p.currentPath.string()),
+                             static_cast<quint64>(p.totalDirs), p.counting);
     });
 
     m_running = true;

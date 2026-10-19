@@ -37,8 +37,13 @@ public:
     ScanDataPtr result() const;
 
 signals:
-    // Emitted from a worker thread; queued to the receiver's thread.
-    void progressChanged(quint64 files, quint64 dirs, quint64 bytes);
+    // Emitted from a worker thread; queued to the receiver's thread. The
+    // currentPath argument is the path being visited (for progress display and
+    // stall diagnostics); totalDirs is the G3 pre-count total (0 = unknown) and
+    // counting is true while that pre-count pass runs.
+    void progressChanged(quint64 files, quint64 dirs, quint64 bytes,
+                         const QString& currentPath, quint64 totalDirs,
+                         bool counting);
     void completed(quint64 filesScanned, quint64 dirsScanned, quint64 allocated,
                    quint64 uniqueAllocated, quint64 skippedCount, quint64 durationMs,
                    quint64 recoverableBytes, bool cancelled);

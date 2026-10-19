@@ -56,6 +56,12 @@ struct DirTotals {
     std::uintmax_t dirCount = 0;
 };
 
+// Totals gathered by the bounded pre-count pass (G3).
+struct PreCountTotals {
+    std::uintmax_t dirs = 0;  // directories the main pass will descend into
+    std::uintmax_t files = 0; // regular files the main pass will count
+};
+
 SkipReason reasonFromErrno(int err) {
     switch (err) {
         case EACCES:
@@ -142,11 +148,30 @@ public:
         // an ancestor (same dev+ino) is detected as a cycle rather than recursed forever.
         m_activeDirs.insert({m_rootDev, static_cast<std::uintmax_t>(rootSt.st_ino)});
 
-        emitProgress(m_opt.root, 0);
-        DirTotals totals = scanDirectory(m_opt.root, 0);
-        m_res.stats.totalLogicalBytes = totals.logical;
-        m_res.stats.totalAllocatedBytes = totals.allocated;
-        m_res.stats.uniqueAllocatedBytes = totals.uniqueAllocated;
+        // G3: bounded pre-count pass — walk the tree once without per-entry
+        // metadata so progress can report a real percentage and ETA. Discarded
+        // when the budget runs out or the pass is cancelled.
+        if (m_opt.estimateTotals && !m_owner->isCancelled()) {
+            const auto budget =
+                m_opt.estimateBudget.count() < 0 ? std::chrono::milliseconds(0)
+                                                 : m_opt.estimateBudget;
+            m_countDeadline = std::chrono::steady_clock::now() + budget;
+            PreCountTotals counted;
+            if (preCount(m_opt.root, 0, counted) && !m_owner->isCancelled()) {
+                m_estDirs = counted.dirs;
+                m_estFiles = counted.files;
+            }
+            emitCountingDone();
+        }
+
+        if (m_owner->isCancelled()) {
+            m_res.cancelled = true;
+        } else {
+            DirTotals totals = scanDirectory(m_opt.root, 0);
+            m_res.stats.totalLogicalBytes = totals.logical;
+            m_res.stats.totalAllocatedBytes = totals.allocated;
+            m_res.stats.uniqueAllocatedBytes = totals.uniqueAllocated;
+        }
 
         // Flush retained top-N (heap order) into sorted descending order.
         m_res.largestFiles.clear();
@@ -182,8 +207,132 @@ private:
             p.bytesSeen = m_res.stats.totalLogicalBytes;
             p.currentDepth = depth;
             p.currentPath = current;
+            p.totalDirs = m_estDirs;
+            p.totalFiles = m_estFiles;
             m_progressCb(p);
         }
+    }
+
+    // Announce that the pre-count phase finished: totals are now known, or 0
+    // when the pass was abandoned. Always emitted, never throttled.
+    void emitCountingDone() {
+        if (!m_progressCb) return;
+        ScanProgress p;
+        p.currentPath = m_opt.root;
+        p.totalDirs = m_estDirs;
+        p.totalFiles = m_estFiles;
+        m_progressCb(p);
+    }
+
+    // Progress while counting (totals still unknown). The first event is
+    // always emitted so even tiny scans show the "Preparing" phase.
+    void emitCounting(const std::filesystem::path& current, int depth,
+                      const PreCountTotals& t) {
+        if (!m_progressCb) return;
+        const std::uintmax_t n = ++m_countCounter;
+        if (n != 1 && n % kProgressInterval != 0) return;
+        ScanProgress p;
+        p.filesScanned = t.files;
+        p.dirsScanned = t.dirs;
+        p.currentDepth = depth;
+        p.currentPath = current;
+        p.counting = true;
+        m_progressCb(p);
+    }
+
+    // G3: bounded pre-count pass. Mirrors scanDirectory()'s traversal
+    // decisions (excludes, filesystem boundary, protection, depth cap, cycle
+    // guard) so the totals match what the main pass will actually visit, but
+    // only tallies: no per-entry stat unless d_type is unknown, no result
+    // mutation (so skips/counts are never recorded twice). Returns false when
+    // abandoned — budget spent or cancelled — and the caller discards the
+    // partial totals.
+    bool preCount(const std::filesystem::path& dir, std::size_t depth,
+                  PreCountTotals& t) {
+        if (m_owner->isCancelled()) {
+            return false;
+        }
+        if (std::chrono::steady_clock::now() >= m_countDeadline) {
+            return false;
+        }
+        emitCounting(dir, static_cast<int>(depth), t);
+
+        DIR* dp = ::opendir(dir.c_str());
+        if (!dp) {
+            return true; // the main pass records the skip and counts nothing
+        }
+        const int dirFd = ::dirfd(dp);
+        ++t.dirs; // mirrors ++m_res.stats.dirsScanned after a successful opendir
+
+        bool ok = true;
+        struct dirent* entry = nullptr;
+        while (ok && (entry = ::readdir(dp)) != nullptr) {
+            if (m_owner->isCancelled()) {
+                m_res.cancelled = true;
+                ok = false;
+                break;
+            }
+
+            const char* name = entry->d_name;
+            if (std::strcmp(name, ".") == 0 || std::strcmp(name, "..") == 0) {
+                continue;
+            }
+            const std::filesystem::path fullPath = dir / name;
+            if (excluded(fullPath)) {
+                continue; // main pass skips these too
+            }
+
+            // Cheap typing first: regular files and symlinks/specials need no
+            // stat here; directories (and unknown d_type) do, for the
+            // filesystem-boundary and cycle checks.
+            const unsigned char dtype = entry->d_type;
+            if (dtype == DT_REG) {
+                ++t.files;
+                continue;
+            }
+            if (dtype == DT_LNK || dtype == DT_FIFO || dtype == DT_SOCK ||
+                dtype == DT_BLK || dtype == DT_CHR) {
+                continue; // symlinks counted nowhere; special files ignored
+            }
+
+            struct stat st {};
+            if (::fstatat(dirFd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
+                continue; // main pass records the skip
+            }
+            if (S_ISLNK(st.st_mode)) {
+                continue;
+            }
+            if (S_ISDIR(st.st_mode)) {
+                if (m_opt.oneFilesystem &&
+                    static_cast<std::uintmax_t>(st.st_dev) != m_rootDev) {
+                    continue;
+                }
+                if (m_opt.skipProtectedPaths && fullPath != m_opt.root &&
+                    utils::isProtectedPath(fullPath)) {
+                    continue;
+                }
+                if (m_opt.maxDepth > 0 && depth + 1 >= m_opt.maxDepth) {
+                    continue; // counted but not descended by the main pass
+                }
+                const InodeKey dirKey{static_cast<std::uintmax_t>(st.st_dev),
+                                      static_cast<std::uintmax_t>(st.st_ino)};
+                if (m_activeDirs.find(dirKey) != m_activeDirs.end()) {
+                    continue; // cycle (G1): main pass skips it as well
+                }
+                m_activeDirs.insert(dirKey);
+                ok = preCount(fullPath, depth + 1, t);
+                m_activeDirs.erase(dirKey);
+                continue;
+            }
+            if (S_ISREG(st.st_mode)) {
+                ++t.files; // d_type was DT_UNKNOWN
+                continue;
+            }
+            // Sockets/FIFOs/devices: ignored by the main pass too.
+        }
+
+        ::closedir(dp);
+        return ok;
     }
 
     DirTotals scanDirectory(const std::filesystem::path& dir, std::size_t depth) {
@@ -193,6 +342,10 @@ private:
             m_res.cancelled = true;
             return totals;
         }
+
+        // Report the directory *before* enumerating it, so that a scan blocked
+        // inside a slow or hung directory still shows where it is.
+        emitProgress(dir, static_cast<int>(depth));
 
         DIR* dp = ::opendir(dir.c_str());
         if (!dp) {
@@ -369,6 +522,13 @@ private:
     std::function<void(const FileItem&)> m_itemCb;
     std::function<void(const DirectorySummary&)> m_dirCb;
     std::uintmax_t m_progressCounter = 0;
+
+    // G3 pre-count state: estimates handed out via progress, the deadline for
+    // the bounded pass, and its own emission counter.
+    std::uintmax_t m_estDirs = 0;
+    std::uintmax_t m_estFiles = 0;
+    std::chrono::steady_clock::time_point m_countDeadline{};
+    std::uintmax_t m_countCounter = 0;
 
 public:
     // Wire callbacks from the owning Scanner.

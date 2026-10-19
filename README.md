@@ -13,14 +13,21 @@ the trash instead of a delete.
 
 - **Dashboard** — mounted filesystems with capacity/usage, a usage donut, and
   total/used/free/estimated-recoverable cards.
-- **Background scans** — cancellable, progress-reporting, hard-link aware, and
-  bind-mount-cycle safe. Never follows symlinks; stays on one filesystem.
+- **Background scans** — cancellable, progress-reporting (determinate bar + ETA
+  from a bounded pre-count), hard-link aware, and bind-mount-cycle safe. Never
+  follows symlinks; stays on one filesystem.
 - **Results view** — sortable, filterable tables of the largest files, largest
   directories (hard-link deduplicated), and cleanup recommendations.
 - **Conservative recommendations** — thumbnails, browser caches, package caches,
-  temp dirs, build artifacts, old downloads, logs, and generic app caches are
-  classified with a risk level (Safe → SystemProtected), a category, a
-  justification, and a confidence level. Name-only heuristics are never enough.
+  temp dirs, build artifacts, old downloads, logs, and generic app caches
+  (including Flatpak/Snap caches) are classified with a risk level (Safe →
+  SystemProtected), a category, a justification, and a confidence level.
+  Name-only heuristics are never enough, and sensitive locations (credential
+  material, personal state) get a raised risk floor.
+- **Application storage (read-only)** — Tools ▸ *Application Storage…* lists
+  installed applications with sizes from dpkg, pacman, rpm, Flatpak and Snap.
+  Driverse never installs or removes packages; it shows (and lets you copy) the
+  command to run yourself, plus a shared-dependency caveat.
 - **Guarded cleanup workflow** — dry-run preview, per-risk confirmation gates,
   type-to-confirm for irreversible actions, TOCTOU identity checks, and an
   audit log written *before* anything is touched.
@@ -29,6 +36,8 @@ the trash instead of a delete.
   regenerable caches classified Safe.
 - **Transparency** — skipped paths are listed with reasons; failures carry
   actionable hints (disk full, read-only filesystem, busy files, ...).
+- **Device insight** — each mount shows its backing disk / partition and whether
+  it is removable media (classified from sysfs).
 
 ## Requirements
 
@@ -67,13 +76,14 @@ cmake --install build --prefix ~/.local
 ctest --test-dir build --output-on-failure
 ```
 
-20 CTest targets cover the core logic (`types`, `utils`, `mounts`, `scanner`,
-`scanner_userns`, `recommendations`, `cleanup`, `trash`, `safety_scenarios`),
-utilities (`config`, `audit`, `cleanupaudit`, `integration`, `logger`), and the
-GUI models/dialogs (`devicetablemodel`, `scanmodel`, `scanworker`,
-`cleanupdialog`, `skippedpathsdialog`, `formatting`). The `scanner_userns`
-suite re-runs the scanner under `unshare -rm` to exercise a real bind-mount
-cycle when user namespaces are available (skipped otherwise).
+24 CTest targets cover the core logic (`types`, `utils`, `mounts`, `scanner`,
+`scanner_userns`, `recommendations`, `cleanup`, `trash`, `safety_scenarios`,
+`protections`), platform services (`blockdev`, `packages`), utilities (`config`,
+`audit`, `cleanupaudit`, `integration`, `logger`), and the GUI models/dialogs
+(`devicetablemodel`, `scanmodel`, `appsmodel`, `scanworker`, `cleanupdialog`,
+`skippedpathsdialog`, `formatting`). The `scanner_userns` suite re-runs the
+scanner under `unshare -rm` to exercise a real bind-mount cycle when user
+namespaces are available (skipped otherwise).
 
 The GUI suites run headless via `QT_QPA_PLATFORM=offscreen`; the same works for
 a smoke run of the app:

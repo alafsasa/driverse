@@ -6,7 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+    # Optimized by default: scanning/classification is string- and syscall-
+    # heavy and is an order of magnitude slower at -O0. RelWithDebInfo keeps
+    # symbols for profiling.
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
 # Warnings: default on, opt out with -DDRIVERSE_WERROR=OFF
@@ -18,6 +21,10 @@ if(MSVC)
     endif()
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
+    # The test suites use plain assert(): keep assertions enabled even in
+    # optimized configurations (otherwise -DNDEBUG from RelWithDebInfo/Release
+    # would silently turn them into no-ops).
+    add_compile_options(-UNDEBUG)
     if(DRIVERSE_WERROR)
         add_compile_options(-Werror)
     endif()
@@ -40,6 +47,8 @@ add_library(driverse_core STATIC
     src/core/recommendations.cpp
     src/core/cleanup.cpp
     src/platform/mounts.cpp
+    src/platform/blockdev.cpp
+    src/platform/packages.cpp
     src/platform/trash.cpp
     src/utils/config.cpp
     src/utils/audit.cpp
@@ -70,6 +79,8 @@ add_executable(driverse
     src/gui/cleanupdialog.h
     src/gui/skippedpathsdialog.cpp
     src/gui/skippedpathsdialog.h
+    src/gui/appsdialog.cpp
+    src/gui/appsdialog.h
     src/gui/formatting.h
 )
 target_link_libraries(driverse PRIVATE

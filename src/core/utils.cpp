@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <string_view>
 #include <system_error>
 
 namespace driverse::core::utils {
@@ -176,10 +177,40 @@ bool isPathUnder(const std::filesystem::path& child, const std::filesystem::path
     return true;
 }
 
+bool isPathUnderNormalized(const std::string& child, const std::string& parent) {
+    if (parent.empty()) {
+        return false;
+    }
+    if (parent == "/") {
+        return child.size() >= 1 && child[0] == '/';
+    }
+    if (child.size() < parent.size()) {
+        return false;
+    }
+    if (child.compare(0, parent.size(), parent) != 0) {
+        return false;
+    }
+    return child.size() == parent.size() || child[parent.size()] == '/';
+}
+
 bool isProtectedPath(const std::filesystem::path& path) {
-    auto absPath = std::filesystem::absolute(path);
-    for (const auto& prot : getDefaultProtectedPaths()) {
-        if (isPathUnder(absPath, std::filesystem::absolute(prot))) {
+    // The default list is a compile-time constant: normalize it once instead
+    // of per call. This runs for every scanned entry, so paying
+    // absolute()+lexically_normal() for ~20 roots each time adds up on large
+    // scans.
+    static const std::vector<std::string> kDefaults = [] {
+        std::vector<std::string> out;
+        out.reserve(32);
+        for (const auto& prot : getDefaultProtectedPaths()) {
+            // normalizedAbsoluteString() also strips trailing slashes, so the
+            // component-boundary prefix test below stays exact.
+            out.push_back(normalizedAbsoluteString(prot));
+        }
+        return out;
+    }();
+    const std::string abs = normalizedAbsoluteString(path);
+    for (const auto& prot : kDefaults) {
+        if (isPathUnderNormalized(abs, prot)) {
             return true;
         }
     }
@@ -193,6 +224,50 @@ std::filesystem::path normalizePath(const std::filesystem::path& path) {
     } catch (...) {
         return path.lexically_normal();
     }
+}
+
+namespace {
+
+// True when `s` is an absolute path that lexically_normal() would return
+// unchanged: no empty ("//"), "." or ".." components and no trailing slash.
+bool isLexicallyNormalAbsolute(std::string_view s) {
+    if (s.empty() || s.front() != '/') {
+        return false;
+    }
+    if (s.size() == 1) {
+        return true; // root
+    }
+    if (s.back() == '/') {
+        return false;
+    }
+    if (s.find("//") != std::string_view::npos ||
+        s.find("/./") != std::string_view::npos ||
+        s.find("/../") != std::string_view::npos) {
+        return false;
+    }
+    return !(s.ends_with("/.") || s.ends_with("/.."));
+}
+
+} // namespace
+
+std::string normalizedAbsoluteString(const std::filesystem::path& path) {
+    // Fast path: every path produced by the scanner is already absolute and
+    // lexically normal. absolute()/lexically_normal() then amount to an
+    // expensive re-parse/rebuild, which adds up when classifying millions of
+    // entries — so validate with a string scan and reuse the string as-is.
+    const std::string s = path.string();
+    if (!s.empty() && s.front() == '/' && isLexicallyNormalAbsolute(s)) {
+        return s;
+    }
+    std::string out = std::filesystem::absolute(path).lexically_normal().string();
+    // lexically_normal() keeps a trailing separator ("/a/b/" -> "/a/b/") and
+    // config-supplied paths often carry one. Strip it (root excepted): every
+    // caller compares these strings at component boundaries, where a trailing
+    // "/" would make "/boot/" fail to match "/boot/efi".
+    while (out.size() > 1 && out.back() == '/') {
+        out.pop_back();
+    }
+    return out;
 }
 
 std::filesystem::path canonicalizeNoFollow(const std::filesystem::path& path) {

@@ -202,6 +202,88 @@ void testCancellation() {
     std::cout << "  cancellation OK\n";
 }
 
+// G3: the bounded pre-count pass reports totals that match what the main pass
+// actually visits (exclude/protected/depth rules mirrored).
+void testPreCountTotalsMatchScan() {
+    ScanOptions opt;
+    opt.root = g_root;
+    opt.skipProtectedPaths = false;
+    opt.excludePaths.push_back(g_root / "excluded");
+
+    bool sawCounting = false;
+    std::uintmax_t doneTotalDirs = 0;
+    std::uintmax_t doneTotalFiles = 0;
+    int doneEvents = 0;
+
+    Scanner scanner;
+    scanner.setOptions(opt);
+    scanner.setProgressCallback([&](const ScanProgress& p) {
+        if (p.counting) {
+            sawCounting = true;
+        }
+        if (!p.counting && p.totalDirs > 0) {
+            doneTotalDirs = p.totalDirs;
+            doneTotalFiles = p.totalFiles;
+            ++doneEvents;
+        }
+    });
+    ScanResult r = scanner.scan();
+
+    assert(r.error.empty());
+    assert(r.completed);
+    assert(sawCounting);            // the counting phase always announces itself
+    assert(doneEvents >= 1);        // ...and announces its totals when done
+    assert(doneTotalDirs > 0);
+    assert(doneTotalFiles > 0);
+    assert(doneTotalDirs == r.stats.dirsScanned);
+    assert(doneTotalFiles == r.stats.filesScanned);
+    std::cout << "  pre-count totals match scan OK\n";
+}
+
+// A zero budget abandons the pass: totals stay unknown (0) and the scan
+// behaves exactly as it did before the estimates existed.
+void testPreCountBudgetExhausted() {
+    ScanOptions opt;
+    opt.root = g_root;
+    opt.skipProtectedPaths = false;
+    opt.estimateBudget = std::chrono::milliseconds(0);
+
+    std::uintmax_t lastTotalDirs = 1; // must come to rest at 0 (unknown)
+    Scanner scanner;
+    scanner.setOptions(opt);
+    scanner.setProgressCallback([&](const ScanProgress& p) { lastTotalDirs = p.totalDirs; });
+    ScanResult r = scanner.scan();
+
+    assert(r.error.empty());
+    assert(r.completed);
+    assert(lastTotalDirs == 0);
+    assert(r.stats.filesScanned > 0);
+    std::cout << "  pre-count budget exhausted OK\n";
+}
+
+// Cancelling while counting stops the scan before the main traversal.
+void testCancelDuringCounting() {
+    ScanOptions opt;
+    opt.root = g_root;
+    opt.skipProtectedPaths = false;
+
+    Scanner scanner;
+    scanner.setOptions(opt);
+    bool requested = false;
+    scanner.setProgressCallback([&](const ScanProgress& p) {
+        if (p.counting && !requested) {
+            requested = true;
+            scanner.cancel();
+        }
+    });
+    ScanResult r = scanner.scan();
+    assert(requested);
+    assert(r.cancelled);
+    assert(!r.completed);
+    assert(r.stats.filesScanned == 0); // main pass never ran
+    std::cout << "  cancel during counting OK\n";
+}
+
 // A real bind-mount cycle needs root. Attempt it, and skip gracefully if we
 // lack privileges (the common case in CI / dev sandboxes).
 void testBindMountCycle() {

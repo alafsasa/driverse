@@ -4,6 +4,7 @@
 #include "platform/mounts.h"
 #include "utils/audit.h"
 
+#include "appsdialog.h"
 #include "cleanupdialog.h"
 #include "deviceTableModel.h"
 #include "formatting.h"
@@ -42,6 +43,9 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <limits>
+
 namespace driverse::gui {
 
 namespace {
@@ -54,6 +58,23 @@ const char* const kRiskTips[5] = {
     "May contain user data — requires strong confirmation.",
     "System critical — never offered for cleanup.",
 };
+
+// Compact ETA for the scan status line: "ETA 42s" / "ETA 3m 5s" / "ETA 1h 2m".
+QString formatEta(qint64 seconds) {
+    if (seconds < 60) {
+        return QStringLiteral("ETA %1s").arg(seconds);
+    }
+    if (seconds < 3600) {
+        return QStringLiteral("ETA %1m%2")
+            .arg(seconds / 60)
+            .arg(seconds % 60 == 0 ? QString()
+                                   : QStringLiteral(" %1s").arg(seconds % 60));
+    }
+    return QStringLiteral("ETA %1h%2")
+        .arg(seconds / 3600)
+        .arg((seconds % 3600) / 60 == 0 ? QString()
+                                        : QStringLiteral(" %1m").arg((seconds % 3600) / 60));
+}
 
 } // namespace
 
@@ -101,6 +122,16 @@ void MainWindow::buildMenus() {
     m_skippedAction->setToolTip(tr("List paths the last scan did not descend into and why"));
     m_skippedAction->setEnabled(false);
     connect(m_skippedAction, &QAction::triggered, this, &MainWindow::showSkippedPaths);
+
+    auto* toolsMenu = menuBar()->addMenu(tr("&Tools"));
+    auto* appsAction = toolsMenu->addAction(tr("&Application Storage..."));
+    appsAction->setToolTip(
+        tr("Read-only inventory of installed applications (query-only)"));
+    connect(appsAction, &QAction::triggered, this, [this]() {
+        auto* dialog = new AppsDialog(this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+    });
 
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
     auto* aboutAction = helpMenu->addAction(tr("&About Driverse"));
@@ -180,6 +211,12 @@ void MainWindow::buildCentral() {
     m_progress->setValue(0);
     m_progress->setFixedWidth(180);
     statusBar()->addPermanentWidget(m_progress);
+
+    // Watchdog: flags scans that stop making progress (slow or unresponsive
+    // filesystem) instead of leaving a frozen byte count on screen.
+    m_stallTimer = new QTimer(this);
+    m_stallTimer->setInterval(1000);
+    connect(m_stallTimer, &QTimer::timeout, this, &MainWindow::onStallTick);
 }
 
 QWidget* MainWindow::buildDashboard(QWidget* parent) {
@@ -505,7 +542,13 @@ void MainWindow::startScan() {
     }
 
     m_cardRecoverable->setValue(QStringLiteral("..."));
-    m_status->setText(tr("Scanning %1 ...").arg(target));
+    m_scanStatusBase = tr("Scanning %1 ...").arg(target);
+    m_scanStatusPath.clear();
+    m_scanStalled = false;
+    m_lastProgressAt.start();
+    m_scanElapsed.start();
+    m_stallTimer->start();
+    m_status->setText(m_scanStatusBase);
     setScanning(true);
     m_worker->start(target);
 }
@@ -521,15 +564,104 @@ const core::DeviceInfo* MainWindow::selectedDevice() const {
 void MainWindow::cancelScan() {
     if (m_worker->isRunning()) {
         m_status->setText(tr("Cancelling ..."));
+        m_stallTimer->stop(); // keep the "Cancelling ..." message on screen
         m_worker->cancel();
     }
 }
 
-void MainWindow::onProgress(quint64 files, quint64 dirs, quint64 seenBytes) {
-    m_status->setText(tr("Scanning... %1 files, %2 dirs, %3")
-                          .arg(files)
-                          .arg(dirs)
-                          .arg(formatting::bytes(seenBytes)));
+void MainWindow::onProgress(quint64 files, quint64 dirs, quint64 seenBytes,
+                            const QString& currentPath, quint64 totalDirs,
+                            bool counting) {
+    m_lastProgressAt.restart();
+    m_scanStalled = false;
+
+    if (counting) {
+        // G3 pre-count pass: totals unknown so far — show what has been
+        // tallied and keep the bar in busy mode.
+        m_scanStatusBase = tr("Preparing... counted %1 dirs").arg(dirs);
+        m_progress->setRange(0, 0);
+    } else if (totalDirs > 0) {
+        // Determinate progress from the pre-count totals, plus an ETA.
+        const int percent = static_cast<int>(
+            std::min<double>(100.0, (100.0 * static_cast<double>(dirs)) /
+                                        static_cast<double>(totalDirs)));
+        m_scanStatusBase =
+            tr("Scanning... %1/%2 dirs (%3%), %4 files, %5")
+                .arg(dirs)
+                .arg(totalDirs)
+                .arg(percent)
+                .arg(files)
+                .arg(formatting::bytes(seenBytes));
+        const QString eta = scanEta(dirs, totalDirs);
+        if (!eta.isEmpty()) {
+            m_scanStatusBase += QStringLiteral(" — ") + eta;
+        }
+        const qint64 barMax = static_cast<qint64>(
+            std::min<quint64>(totalDirs, static_cast<quint64>(std::numeric_limits<int>::max())));
+        m_progress->setRange(0, static_cast<int>(barMax));
+        m_progress->setValue(static_cast<int>(std::min<qint64>(static_cast<qint64>(dirs), barMax)));
+    } else {
+        // Totals unknown (pass disabled or abandoned on a huge tree):
+        // counts-only with a busy bar, i.e. the pre-G3 behaviour.
+        m_scanStatusBase = tr("Scanning... %1 files, %2 dirs, %3")
+                               .arg(files)
+                               .arg(dirs)
+                               .arg(formatting::bytes(seenBytes));
+        m_progress->setRange(0, 0);
+    }
+
+    m_scanStatusPath =
+        currentPath.isEmpty()
+            ? QString()
+            : QString::fromStdString(
+                  core::utils::abbreviatePath(currentPath.toStdString(), 72));
+    m_status->setText(m_scanStatusPath.isEmpty()
+                          ? m_scanStatusBase
+                          : m_scanStatusBase + QStringLiteral(" — ") + m_scanStatusPath);
+}
+
+// ETA for the remaining directories, derived from the observed scan rate.
+// Empty when there is not enough data to extrapolate sensibly.
+QString MainWindow::scanEta(quint64 dirsDone, quint64 totalDirs) const {
+    if (!m_scanElapsed.isValid() || dirsDone == 0 || totalDirs <= dirsDone) {
+        return QString();
+    }
+    const qint64 elapsedMs = m_scanElapsed.elapsed();
+    if (elapsedMs < 500) {
+        return QString();
+    }
+    const double ratePerSec = static_cast<double>(dirsDone) * 1000.0 / elapsedMs;
+    if (ratePerSec <= 0.0) {
+        return QString();
+    }
+    const qint64 remaining =
+        static_cast<qint64>(static_cast<double>(totalDirs - dirsDone) / ratePerSec);
+    return formatEta(remaining);
+}
+
+void MainWindow::onStallTick() {
+    if (!m_worker || !m_worker->isRunning() || !m_lastProgressAt.isValid()) {
+        return;
+    }
+    constexpr qint64 kStallThresholdMs = 5000;
+    const qint64 elapsedMs = m_lastProgressAt.elapsed();
+    if (elapsedMs < kStallThresholdMs) {
+        if (m_scanStalled) {
+            m_scanStalled = false;
+            m_status->setText(m_scanStatusPath.isEmpty()
+                                  ? m_scanStatusBase
+                                  : m_scanStatusBase + QStringLiteral(" — ") +
+                                        m_scanStatusPath);
+        }
+        return;
+    }
+    m_scanStalled = true;
+    m_status->setText(tr("No scan progress for %1 s — last activity: %2  "
+                         "(Esc to cancel; a slow or unresponsive filesystem "
+                         "can pause scanning)")
+                          .arg(elapsedMs / 1000)
+                          .arg(m_scanStatusPath.isEmpty() ? tr("(unknown)")
+                                                          : m_scanStatusPath));
 }
 
 void MainWindow::onCompleted(quint64 filesScanned, quint64 dirsScanned, quint64 allocated,
@@ -581,6 +713,12 @@ void MainWindow::setScanning(bool scanning) {
     m_scanButton->setEnabled(!scanning && !currentTarget().isEmpty());
     m_cancelButton->setEnabled(scanning);
     m_selectButton->setEnabled(!scanning);
+    if (!scanning) {
+        m_stallTimer->stop();
+        m_scanStalled = false;
+        m_lastProgressAt.invalidate();
+        m_scanElapsed.invalidate();
+    }
     if (m_cleanupButton) {
         m_cleanupButton->setEnabled(!scanning && m_recsModel->checkedCount() > 0);
     }
@@ -589,7 +727,9 @@ void MainWindow::setScanning(bool scanning) {
         m_skippedAction->setEnabled(!scanning && data && !data->result.skipped.empty());
     }
     if (scanning) {
-        m_progress->setRange(0, 0); // busy indicator (no total estimate yet: G3)
+        // Busy indicator until the G3 pre-count totals arrive; scans without
+        // totals (disabled pass / huge trees) keep it for the whole run.
+        m_progress->setRange(0, 0);
         m_progress->setValue(0);
     }
 }

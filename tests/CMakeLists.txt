@@ -20,6 +20,10 @@ add_executable(test_recommendations core/test_recommendations.cpp)
 target_link_libraries(test_recommendations PRIVATE driverse_core)
 add_test(NAME recommendations COMMAND test_recommendations)
 
+add_executable(test_protections core/test_protections.cpp)
+target_link_libraries(test_protections PRIVATE driverse_core)
+add_test(NAME protections COMMAND test_protections)
+
 add_executable(test_cleanup core/test_cleanup.cpp)
 target_link_libraries(test_cleanup PRIVATE driverse_core)
 add_test(NAME cleanup COMMAND test_cleanup)
@@ -31,6 +35,14 @@ add_test(NAME safety_scenarios COMMAND test_safety_scenarios)
 add_executable(test_trash platform/test_trash.cpp)
 target_link_libraries(test_trash PRIVATE driverse_core)
 add_test(NAME trash COMMAND test_trash)
+
+add_executable(test_blockdev platform/test_blockdev.cpp)
+target_link_libraries(test_blockdev PRIVATE driverse_core)
+add_test(NAME blockdev COMMAND test_blockdev)
+
+add_executable(test_packages platform/test_packages.cpp)
+target_link_libraries(test_packages PRIVATE driverse_core)
+add_test(NAME packages COMMAND test_packages)
 
 add_executable(test_config utils/test_config.cpp)
 target_link_libraries(test_config PRIVATE driverse_core)
@@ -69,6 +81,14 @@ add_executable(test_scanmodel
 )
 target_link_libraries(test_scanmodel PRIVATE driverse_core Qt6::Gui)
 add_test(NAME scanmodel COMMAND test_scanmodel)
+
+add_executable(test_appsmodel
+    gui/test_appsmodel.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/appsdialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui/appsdialog.h
+)
+target_link_libraries(test_appsmodel PRIVATE driverse_core Qt6::Widgets Qt6::Concurrent)
+add_test(NAME appsmodel COMMAND test_appsmodel)
 
 add_executable(test_scanworker
     gui/test_scanworker.cpp

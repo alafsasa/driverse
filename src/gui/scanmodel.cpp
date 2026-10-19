@@ -118,13 +118,19 @@ std::optional<core::RiskLevel> ResultsTableModel::riskForSource(int src) const {
 }
 
 bool ResultsTableModel::passesFilters(int src) const {
-    const std::optional<core::RiskLevel> risk = riskForSource(src);
-
-    if (m_mode != Mode::Recommendations && m_recommendedOnly && !risk) {
-        return false;
-    }
-    if (risk && (m_riskMask & (1 << static_cast<int>(*risk))) == 0) {
-        return false;
+    // Resolve risk only when a risk-aware filter is active. Looking it up per
+    // row (path -> string -> hash) is expensive on scans with millions of
+    // directories and is pure overhead when the default filters are in effect.
+    const bool needRisk = (m_riskMask != 0x1F) ||
+                          (m_mode != Mode::Recommendations && m_recommendedOnly);
+    if (needRisk) {
+        const std::optional<core::RiskLevel> risk = riskForSource(src);
+        if (m_mode != Mode::Recommendations && m_recommendedOnly && !risk) {
+            return false;
+        }
+        if (risk && (m_riskMask & (1 << static_cast<int>(*risk))) == 0) {
+            return false;
+        }
     }
     if (!m_pathFilter.isEmpty()) {
         const QString path = QString::fromStdString(pathForSource(src).string());
@@ -152,32 +158,38 @@ void ResultsTableModel::rebuild() {
 
         const int column = m_sortColumn;
         const Qt::SortOrder order = m_sortOrder;
-        std::stable_sort(m_visible.begin(), m_visible.end(),
-                         [this, column, order](int a, int b) {
-                             const QVariant ka = sortKey(a, column);
-                             const QVariant kb = sortKey(b, column);
-                             const bool numeric =
-                                 ka.typeId() == QMetaType::ULongLong ||
-                                 ka.typeId() == QMetaType::LongLong ||
-                                 ka.typeId() == QMetaType::Int;
-                             int cmp = 0;
-                             if (numeric) {
-                                 const qulonglong va = ka.toULongLong();
-                                 const qulonglong vb = kb.toULongLong();
-                                 cmp = (va < vb) ? -1 : ((va > vb) ? 1 : 0);
-                             } else {
-                                 cmp = QString::compare(ka.toString(), kb.toString(),
-                                                        Qt::CaseInsensitive);
-                                 cmp = (cmp < 0) ? -1 : ((cmp > 0) ? 1 : 0);
-                             }
-                             if (cmp == 0) {
-                                 return a < b; // stable tie-break by source order
-                             }
-                             return order == Qt::AscendingOrder ? (cmp < 0) : (cmp > 0);
-                         });
+        auto comparator = [this, column, order](int a, int b) {
+            const QVariant ka = sortKey(a, column);
+            const QVariant kb = sortKey(b, column);
+            const bool numeric =
+                ka.typeId() == QMetaType::ULongLong ||
+                ka.typeId() == QMetaType::LongLong ||
+                ka.typeId() == QMetaType::Int;
+            int cmp = 0;
+            if (numeric) {
+                const qulonglong va = ka.toULongLong();
+                const qulonglong vb = kb.toULongLong();
+                cmp = (va < vb) ? -1 : ((va > vb) ? 1 : 0);
+            } else {
+                cmp = QString::compare(ka.toString(), kb.toString(),
+                                       Qt::CaseInsensitive);
+                cmp = (cmp < 0) ? -1 : ((cmp > 0) ? 1 : 0);
+            }
+            if (cmp == 0) {
+                return a < b; // stable tie-break by source order
+            }
+            return order == Qt::AscendingOrder ? (cmp < 0) : (cmp > 0);
+        };
 
-        if (static_cast<int>(m_visible.size()) > kMaxRows) {
+        if (m_visible.size() > static_cast<std::size_t>(kMaxRows)) {
+            // The view caps rows anyway: keep only the top ones instead of
+            // fully sorting millions of rows (partial_sort is O(n log k)).
+            std::partial_sort(m_visible.begin(),
+                              m_visible.begin() + kMaxRows,
+                              m_visible.end(), comparator);
             m_visible.resize(static_cast<std::size_t>(kMaxRows));
+        } else {
+            std::stable_sort(m_visible.begin(), m_visible.end(), comparator);
         }
     }
 
@@ -192,9 +204,14 @@ void ResultsTableModel::setData(const ScanDataPtr& data) {
 
 void ResultsTableModel::setFilters(const QString& pathSubstring, std::uintmax_t minBytes,
                                    int riskMask, bool recommendedOnly) {
+    const int mask = riskMask & 0x1F;
+    if (m_pathFilter == pathSubstring && m_minBytes == minBytes && m_riskMask == mask &&
+        m_recommendedOnly == recommendedOnly) {
+        return; // nothing changed: skip the rebuild entirely
+    }
     m_pathFilter = pathSubstring;
     m_minBytes = minBytes;
-    m_riskMask = riskMask & 0x1F;
+    m_riskMask = mask;
     m_recommendedOnly = recommendedOnly;
     rebuild();
 }

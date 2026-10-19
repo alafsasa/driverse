@@ -70,6 +70,24 @@ void testApplyProtectedPathsIdempotent() {
     std::cout << "  applyProtectedPaths idempotent OK\n";
 }
 
+void testProtectedPathTrailingSlash() {
+    auto& protections = driverse::core::Protections::instance();
+
+    // Config-supplied protected paths often come with a trailing slash
+    // ("/srv/data/"). The normalized cache must strip it, otherwise the
+    // boundary-exact prefix test misses everything below the entry.
+    protections.addProtectedPath("/opt/driverse_trailing/");
+    assert(protections.isProtected("/opt/driverse_trailing"));
+    assert(protections.isProtected("/opt/driverse_trailing/child"));
+    assert(protections.isProtected("/opt/driverse_trailing/child/file.txt"));
+    // Component boundary still holds: the sibling prefix is not protected.
+    assert(!protections.isProtected("/opt/driverse_trailing2"));
+
+    protections.removeProtectedPath("/opt/driverse_trailing/");
+    assert(!protections.isProtected("/opt/driverse_trailing/child"));
+    std::cout << "  protected path trailing slash OK\n";
+}
+
 } // namespace
 
 int main() {
@@ -77,6 +95,7 @@ int main() {
     testRecommendationOptionsFromConfig();
     testScanOptionsFromConfig();
     testApplyProtectedPathsIdempotent();
+    testProtectedPathTrailingSlash();
     std::cout << "All integration tests passed!\n";
     return 0;
 }

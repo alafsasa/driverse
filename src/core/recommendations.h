@@ -74,6 +74,8 @@ private:
                                                    ConfidenceLevel sizeConfidence) const;
 
     RecommendationOptions m_opts;
+    // m_opts.homeDirectory, absolute + lexically normalized once (hot path).
+    std::string m_homeNormalized;
 };
 
 // Human-readable category name (for logs / UI).

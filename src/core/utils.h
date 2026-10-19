@@ -42,9 +42,20 @@ std::vector<std::string> getDefaultExcludedFsTypes();
 // Normalize path (resolve .. where safe, but don't follow symlinks)
 std::filesystem::path normalizePath(const std::filesystem::path& path);
 
+// Absolute + lexically-normal string form of `path`. Fast-paths paths that
+// already are absolute and lexically normal (the common case for scanned
+// entries), avoiding the costly re-parse of absolute()/lexically_normal().
+std::string normalizedAbsoluteString(const std::filesystem::path& path);
+
 // True if `child` equals or is nested under `parent`, compared component-wise
 // without resolving symlinks (so "/etcetera" is NOT under "/etc").
 bool isPathUnder(const std::filesystem::path& child, const std::filesystem::path& parent);
+
+// Fast component-boundary prefix test for paths that are already absolute and
+// lexically normalized (in std::string form). Equivalent to isPathUnder() but
+// avoids re-normalizing both sides; used on hot paths such as the per-entry
+// protected-path checks during a scan.
+bool isPathUnderNormalized(const std::string& child, const std::string& parent);
 
 // Canonicalize a path for safe operations: resolve symlinks in the existing
 // ancestor components but do NOT follow a symlink in the final component.

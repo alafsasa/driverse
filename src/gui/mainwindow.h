@@ -2,6 +2,7 @@
 
 #include "core/types.h"
 
+#include <QElapsedTimer>
 #include <QMainWindow>
 #include <QString>
 
@@ -44,13 +45,15 @@ private slots:
     void startScan();
     void cancelScan();
 
-    void onProgress(quint64 files, quint64 dirs, quint64 bytes);
+    void onProgress(quint64 files, quint64 dirs, quint64 bytes,
+                    const QString& currentPath, quint64 totalDirs, bool counting);
     void onCompleted(quint64 filesScanned, quint64 dirsScanned, quint64 allocated,
                      quint64 uniqueAllocated, quint64 skippedCount, quint64 durationMs,
                      quint64 recoverableBytes, bool cancelled);
     void onFailed(const QString& error);
     void showAbout();
     void showSkippedPaths();
+    void onStallTick();
 
     void applyFilters();
     void onTabChanged();
@@ -79,6 +82,7 @@ private:
     QTableView* activeResultsView() const;
     ResultsTableModel* activeResultsModel() const;
     QString currentTarget() const;
+    QString scanEta(quint64 dirsDone, quint64 totalDirs) const;
 
     DeviceTableModel* m_model = nullptr;
     QTableView* m_table = nullptr;
@@ -121,6 +125,17 @@ private:
     QProgressBar* m_progress = nullptr;
     QLabel* m_status = nullptr;
     QAction* m_skippedAction = nullptr;
+
+    // Scan progress display: remembers the last text/path so the periodic
+    // watchdog can flag scans that make no progress (slow or hung filesystem).
+    // m_scanElapsed measures the whole scan (including the G3 pre-count pass)
+    // for the ETA; m_lastProgressAt only measures time since the last event.
+    QTimer* m_stallTimer = nullptr;
+    QElapsedTimer m_lastProgressAt;
+    QElapsedTimer m_scanElapsed;
+    QString m_scanStatusBase;
+    QString m_scanStatusPath;
+    bool m_scanStalled = false;
 
     ScanWorker* m_worker = nullptr;
 

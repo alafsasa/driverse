@@ -1,4 +1,5 @@
 #include "mounts.h"
+#include "blockdev.h"
 #include "core/utils.h"
 
 #include <fstream>
@@ -91,6 +92,13 @@ DeviceInfo MountDetector::parseMountInfoLine(const std::string& line) {
 
     info.isPseudoFs = utils::isPseudoFilesystem(info.fsType);
     info.isNetworkFs = utils::isNetworkFilesystem(info.fsType);
+
+    // G2: classify the backing block device (partition vs top-level disk,
+    // removable media). Unknown for non-block sources.
+    const BlockDevice bd = queryBlockDevice(info.device);
+    info.parentDisk = bd.disk;
+    info.isPartition = bd.isPartition;
+    info.isRemovable = bd.isRemovable;
 
     if (!info.mountPoint.empty()) {
         getCapacity(info.mountPoint, info);

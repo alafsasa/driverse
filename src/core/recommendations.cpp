@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 
 #include <unistd.h>
 
@@ -19,9 +20,45 @@ bool pathStartsWith(const std::string& s, const std::string& prefix) {
     return s.size() == prefix.size() || s[prefix.size()] == '/';
 }
 
+// "~/.cache" relative to home *with* its trailing separator. For matches
+// that must be strictly below ~/.cache (pathStartsWith() is unusable for
+// this: its boundary check requires the char after the prefix to be '/').
+constexpr std::string_view kCacheDirPrefix = ".cache/";
+
 bool pathEndsWith(const std::string& s, const std::string& suffix) {
     if (s.size() < suffix.size()) return false;
     return s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+// Flatpak per-app cache: ~/.var/app/<app-id>/cache[/...]. The sibling
+// data/ and config/ directories hold user state and are never candidates.
+bool isFlatpakAppCache(const std::string& rel) {
+    constexpr std::string_view kFlatpakRoot = ".var/app/";
+    if (!rel.starts_with(kFlatpakRoot)) return false;
+    std::string_view rest(rel.data() + kFlatpakRoot.size(),
+                          rel.size() - kFlatpakRoot.size());
+    const std::size_t slash = rest.find('/');
+    if (slash == std::string_view::npos) return false; // the <app-id> dir itself
+    std::string_view tail = rest.substr(slash + 1);
+    return tail == "cache" || tail.starts_with("cache/");
+}
+
+// Snap: any directory literally named ".cache" below ~/snap/<name>/ — that is
+// the XDG cache a snap sees (revision home or the shared common/ home).
+// Other snap dirs (.config, data, common/) are app state, never candidates.
+bool isSnapCache(const std::string& rel) {
+    if (!rel.starts_with("snap/")) return false;
+    std::size_t pos = 0;
+    while (pos <= rel.size()) {
+        const std::size_t next = rel.find('/', pos);
+        const std::string_view comp = (next == std::string::npos)
+                                          ? std::string_view(rel).substr(pos)
+                                          : std::string_view(rel).substr(pos, next - pos);
+        if (comp == ".cache") return true;
+        if (next == std::string::npos) break;
+        pos = next + 1;
+    }
+    return false;
 }
 
 struct RelInfo {
@@ -58,7 +95,7 @@ bool isBuildArtifactName(const std::string& name) {
 
 std::string normalizeHome(const std::filesystem::path& home) {
     if (home.empty()) return {};
-    std::string s = std::filesystem::absolute(home).lexically_normal().string();
+    std::string s = utils::normalizedAbsoluteString(home);
     while (s.size() > 1 && s.back() == '/') s.pop_back();
     return s;
 }
@@ -117,14 +154,14 @@ RecommendationEngine::RecommendationEngine(RecommendationOptions opts)
     if (m_opts.currentUserUid == 0) {
         m_opts.currentUserUid = static_cast<std::uintmax_t>(::getuid());
     }
+    m_homeNormalized = normalizeHome(m_opts.homeDirectory);
 }
 
 std::optional<CleanupCategory> RecommendationEngine::matchCategory(
     const std::filesystem::path& path, bool isDirectory) const {
 
-    const std::string abs = std::filesystem::absolute(path).lexically_normal().string();
-    const std::string home = normalizeHome(m_opts.homeDirectory);
-    const RelInfo info = relativeToHome(abs, home);
+    const std::string abs = utils::normalizedAbsoluteString(path);
+    const RelInfo info = relativeToHome(abs, m_homeNormalized);
 
     if (info.inHome) {
         const std::string& rel = info.rel;
@@ -145,14 +182,26 @@ std::optional<CleanupCategory> RecommendationEngine::matchCategory(
         if (pathStartsWith(rel, ".cache/tmp")) {
             return CleanupCategory::TempCache;
         }
+        // Explicit Flatpak/Snap cache detection (G5): sandboxed app caches are
+        // regenerable like any other app cache; their data/config state is not
+        // and falls through to the conservative "not a candidate" default.
+        if (isFlatpakAppCache(rel) || isSnapCache(rel)) {
+            return CleanupCategory::ApplicationCache;
+        }
         if (pathStartsWith(rel, "Downloads") || pathStartsWith(rel, "downloads")) {
             return CleanupCategory::Downloads;
         }
         if (pathEndsWith(rel, ".log")) {
             return CleanupCategory::LogFile;
         }
-        // Generic application cache — must come after the specific rules above.
-        if (pathStartsWith(rel, ".cache/")) {
+        // Generic application cache — must come after the specific rules
+        // above. Match strictly *under* ~/.cache: pathStartsWith() can't be
+        // used here (its prefix ends with "/", so the component-boundary
+        // check could never succeed), and the "~/.cache" directory itself
+        // must stay a non-candidate — otherwise it would swallow every
+        // per-app cache beneath it in recommend()'s shallowest-first pass.
+        if (rel.size() > kCacheDirPrefix.size() &&
+            rel.compare(0, kCacheDirPrefix.size(), kCacheDirPrefix) == 0) {
             return CleanupCategory::ApplicationCache;
         }
         if (isBuildArtifactName(std::filesystem::path(abs).filename().string())) {
@@ -299,6 +348,24 @@ std::optional<CleanupCandidate> RecommendationEngine::classifyCommon(
         justification += "; owned by another user/root";
     }
 
+    // Sensitive-location rule (G4): a category may never whitewash where the
+    // file lives. Credential material is floored at High (strong confirmation
+    // gate, never permanent-delete eligible), personal state at Medium. The
+    // cache exemption in Protections keeps real caches (browser/Chromium
+    // caches, thumbnails) out of this, so ordinary caches keep their risk.
+    const SensitiveLevel sens = Protections::instance().sensitiveLevel(path);
+    if (sens != SensitiveLevel::None) {
+        const RiskLevel floor = (sens == SensitiveLevel::Credential)
+                                    ? RiskLevel::High
+                                    : RiskLevel::Medium;
+        if (static_cast<int>(risk) < static_cast<int>(floor)) {
+            risk = floor;
+        }
+        justification += (sens == SensitiveLevel::Credential)
+                             ? "; credential/key material — review carefully"
+                             : "; sensitive personal state — review carefully";
+    }
+
     // Conservative recoverable estimate. A hard-linked file may share all of its
     // blocks with other names, so deleting one name could free nothing.
     std::uintmax_t recoverable = allocatedSize;
@@ -329,6 +396,9 @@ std::optional<CleanupCandidate> RecommendationEngine::classifyCommon(
     c.allocatedSize = recoverable;
     c.justification = justification;
     c.tags = {categoryToString(c.category), riskColorTag(risk)};
+    if (sens != SensitiveLevel::None) {
+        c.tags.push_back("sensitive");
+    }
     return c;
 }
 
@@ -349,27 +419,46 @@ std::vector<CleanupCandidate> RecommendationEngine::recommend(const ScanResult& 
     std::vector<CleanupCandidate> out;
 
     // Directories, shallowest first, so an outer cache dir "absorbs" its
-    // nested subdirectories.
-    std::vector<DirectorySummary> dirs = scan.directories;
+    // nested subdirectories. Iterate by pointer: copying every
+    // DirectorySummary (each owns a path) is expensive on scans with millions
+    // of directories.
+    std::vector<const DirectorySummary*> dirs;
+    dirs.reserve(scan.directories.size());
+    for (const auto& d : scan.directories) {
+        dirs.push_back(&d);
+    }
     std::stable_sort(dirs.begin(), dirs.end(),
-                     [](const DirectorySummary& a, const DirectorySummary& b) {
-                         return a.depth < b.depth;
+                     [](const DirectorySummary* a, const DirectorySummary* b) {
+                         return a->depth < b->depth;
                      });
 
-    std::vector<std::filesystem::path> acceptedDirs;
-    auto underAcceptedDir = [&acceptedDirs](const std::filesystem::path& p) {
+    // Nesting checks are purely lexical (component-boundary prefix on
+    // normalized paths). Never use std::filesystem::relative() here: libstdc++
+    // implements it via canonicalization, which turns into a stat/readlink
+    // storm — once per directory per accepted candidate — and makes a large
+    // scan appear to stall for minutes right before results appear. All paths
+    // come from one traversal of one root, so lexical nesting is exact.
+    std::vector<std::string> acceptedDirs; // lexically-normal absolute paths
+    auto underAcceptedDir = [&acceptedDirs](const std::filesystem::path& path) {
+        const std::string p = utils::normalizedAbsoluteString(path);
         for (const auto& d : acceptedDirs) {
-            auto rel = std::filesystem::relative(p, d);
-            if (!rel.empty() && *rel.begin() != "..") return true;
+            if (d == "/") {
+                if (p.size() > 1) return true; // anything below the root
+                continue;
+            }
+            // Strictly nested: shared prefix ending on a component boundary
+            // (so ".cache/tmp" does not swallow ".cache/tmp2").
+            if (p.size() <= d.size()) continue;
+            if (p.compare(0, d.size(), d) == 0 && p[d.size()] == '/') return true;
         }
         return false;
     };
 
-    for (const auto& d : dirs) {
-        if (underAcceptedDir(d.path)) continue;
-        auto cand = classifyDirectory(d);
+    for (const DirectorySummary* dp : dirs) {
+        if (underAcceptedDir(dp->path)) continue;
+        auto cand = classifyDirectory(*dp);
         if (!cand || cand->risk == RiskLevel::SystemProtected) continue;
-        acceptedDirs.push_back(cand->path);
+        acceptedDirs.push_back(utils::normalizedAbsoluteString(cand->path));
         out.push_back(std::move(*cand));
     }
 

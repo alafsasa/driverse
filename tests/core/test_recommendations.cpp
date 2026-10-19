@@ -196,11 +196,65 @@ void testHardLinkedRecoverableZero() {
 
 void testLogFile() {
     auto engine = makeEngine();
+    // A log outside the personal-state trees keeps its Low risk...
+    auto plain = engine.classify(mkFile(kHome + "/project/app.log", 2048, kUid, 10));
+    assert(plain.has_value());
+    assert(plain->category == CleanupCategory::LogFile);
+    assert(plain->risk == RiskLevel::Low);
+
+    // ...but the same file below ~/.local/share is personal state and is
+    // floored at Medium with a warning (G4 sensitive-location rule).
     auto c = engine.classify(mkFile(kHome + "/.local/share/app/app.log", 2048, kUid, 10));
     assert(c.has_value());
     assert(c->category == CleanupCategory::LogFile);
-    assert(c->risk == RiskLevel::Low);
-    std::cout << "  log file -> Low\n";
+    assert(c->risk == RiskLevel::Medium);
+    assert(c->justification.find("sensitive personal state") != std::string::npos);
+    std::cout << "  log file -> Low (plain), Medium (personal state)\n";
+}
+
+// G4: no category may whitewash where a file lives — credential material
+// floors at High, personal state at Medium, and real cache dirs below a
+// profile (browser/Chromium caches) stay exempt.
+void testSensitiveLocationFloors() {
+    auto engine = makeEngine();
+
+    // Low -> High: a log inside ~/.ssh is credential territory.
+    auto cred = engine.classify(mkFile(kHome + "/.ssh/session.log", 1024, kUid, 40));
+    assert(cred.has_value());
+    assert(cred->risk == RiskLevel::High);
+    assert(!cred->permanentDeleteAllowed);
+    assert(cred->justification.find("credential") != std::string::npos);
+    bool tagged = false;
+    for (const auto& t : cred->tags) {
+        if (t == "sensitive") tagged = true;
+    }
+    assert(tagged);
+
+    // Medium -> High: a directory that looks like a build artifact but sits
+    // in ~/.gnupg.
+    auto gpgBuild = engine.classify(mkFile(kHome + "/.gnupg/build", 512, kUid, 40));
+    assert(gpgBuild.has_value());
+    assert(gpgBuild->category == CleanupCategory::BuildArtifact);
+    assert(gpgBuild->risk == RiskLevel::High);
+
+    // Low -> Medium: browser state below ~/.config (not a cache subdir).
+    auto profile = engine.classify(mkFile(kHome + "/.config/mozilla/app.log", 512, kUid, 40));
+    assert(profile.has_value());
+    assert(profile->risk == RiskLevel::Medium);
+    assert(profile->justification.find("sensitive personal state") != std::string::npos);
+
+    // Exempt: a real cache directory inside the same profile stays Low.
+    auto cacheEntry = engine.classify(
+        mkFile(kHome + "/.config/mozilla/xyz.default/cache2/entries/AB12", 4096, kUid, 10));
+    assert(cacheEntry.has_value());
+    assert(cacheEntry->risk == RiskLevel::Low);
+
+    // Control: caches below ~/.cache are untouched by the rule.
+    auto plainCache = engine.classify(
+        mkFile(kHome + "/.cache/mozilla/firefox/xyz.default/cache2/entries/AB12", 4096, kUid, 10));
+    assert(plainCache.has_value());
+    assert(plainCache->risk == RiskLevel::Low);
+    std::cout << "  sensitive-location risk floors OK\n";
 }
 
 void testRecommendDeduplicatesNestedDirs() {
@@ -236,6 +290,141 @@ void testRecommendDeduplicatesNestedDirs() {
     assert(total == 1000 + 500);
     assert(totalRecoverableForRisk(out, RiskLevel::Safe) == 1000);
     std::cout << "  recommend() dedup + totals OK\n";
+}
+
+void testNestingBoundaryIsComponentWise() {
+    auto engine = makeEngine();
+    ScanResult scan;
+    scan.root = kHome;
+    scan.directories.push_back(mkDir(kHome + "/.cache/thumbnails", 1000, 3));
+    scan.directories.push_back(mkDir(kHome + "/.cache/thumbnails/normal", 800, 4));
+    // Shares the string prefix with the thumbnails dir but is a different
+    // component: it must NOT be absorbed by that candidate.
+    scan.directories.push_back(mkDir(kHome + "/.cache/thumbnails2", 600, 3));
+
+    auto out = engine.recommend(scan);
+
+    bool sawThumb = false;
+    bool sawNested = false;
+    bool sawThumb2 = false;
+    for (const auto& c : out) {
+        if (c.path == (kHome + "/.cache/thumbnails")) sawThumb = true;
+        if (c.path == (kHome + "/.cache/thumbnails/normal")) sawNested = true;
+        if (c.path == (kHome + "/.cache/thumbnails2")) sawThumb2 = true;
+    }
+    assert(out.size() == 2);
+    assert(sawThumb);
+    assert(sawThumb2);
+    assert(!sawNested);
+    std::cout << "  nesting boundary is component-wise OK\n";
+}
+
+// The generic rule for app caches must (a) fire for anything strictly under
+// ~/.cache and (b) leave "~/.cache" itself alone — if the container dir were
+// a candidate it would absorb every per-app cache in recommend()'s
+// shallowest-first pass and hide the specific classifications.
+void testGenericApplicationCacheClassification() {
+    auto engine = makeEngine();
+    ScanResult scan;
+    scan.root = kHome;
+    scan.directories.push_back(mkDir(kHome + "/.cache", 5000, 1));
+    scan.directories.push_back(mkDir(kHome + "/.cache/someapp", 3000, 2));
+    scan.directories.push_back(mkDir(kHome + "/.cache/someapp/sub", 700, 3));
+
+    auto out = engine.recommend(scan);
+
+    bool sawCacheRoot = false;
+    bool sawApp = false;
+    bool sawSub = false;
+    for (const auto& c : out) {
+        if (c.path == (kHome + "/.cache")) sawCacheRoot = true;
+        if (c.path == (kHome + "/.cache/someapp")) {
+            sawApp = true;
+            assert(c.category == CleanupCategory::ApplicationCache);
+            assert(c.risk != RiskLevel::Safe); // conservative by design
+        }
+        if (c.path == (kHome + "/.cache/someapp/sub")) sawSub = true;
+    }
+    assert(out.size() == 1);
+    assert(sawApp);
+    assert(!sawCacheRoot);
+    assert(!sawSub);
+    std::cout << "  generic application cache classification OK\n";
+}
+
+// G5: sandboxed app caches must be detected explicitly — Flatpak per-app
+// caches below ~/.var/app/<id>/cache, Snap XDG caches inside ~/snap/<name>/.
+// Their data/config state must stay out of the candidate list.
+void testFlatpakAndSnapCaches() {
+    auto engine = makeEngine();
+    ScanResult scan;
+    scan.root = kHome;
+    scan.directories.push_back(mkDir(kHome + "/.var/app/org.test.App", 100, 2));
+    scan.directories.push_back(mkDir(kHome + "/.var/app/org.test.App/cache", 900, 3));
+    scan.directories.push_back(mkDir(kHome + "/.var/app/org.test.App/cache/nested", 100, 4));
+    scan.directories.push_back(mkDir(kHome + "/.var/app/org.test.App/data", 500, 3));
+    scan.directories.push_back(mkDir(kHome + "/.var/app/org.test.App/config", 400, 3));
+    scan.directories.push_back(mkDir(kHome + "/snap/demo/5/.cache", 800, 3));
+    scan.directories.push_back(mkDir(kHome + "/snap/demo/common/.cache", 300, 3));
+    scan.directories.push_back(mkDir(kHome + "/snap/demo/5/.config", 700, 3));
+
+    auto out = engine.recommend(scan);
+
+    bool sawFlatpakCache = false;
+    bool sawFlatpakNested = false;
+    bool sawSnapRevCache = false;
+    bool sawSnapCommonCache = false;
+    bool sawFlatpakApp = false;
+    bool sawFlatpakData = false;
+    bool sawFlatpakConfig = false;
+    bool sawSnapConfig = false;
+    for (const auto& c : out) {
+        if (c.path == (kHome + "/.var/app/org.test.App/cache")) {
+            sawFlatpakCache = true;
+            assert(c.category == CleanupCategory::ApplicationCache);
+        }
+        if (c.path == (kHome + "/.var/app/org.test.App/cache/nested")) sawFlatpakNested = true;
+        if (c.path == (kHome + "/snap/demo/5/.cache")) sawSnapRevCache = true;
+        if (c.path == (kHome + "/snap/demo/common/.cache")) sawSnapCommonCache = true;
+        if (c.path == (kHome + "/.var/app/org.test.App")) sawFlatpakApp = true;
+        if (c.path == (kHome + "/.var/app/org.test.App/data")) sawFlatpakData = true;
+        if (c.path == (kHome + "/.var/app/org.test.App/config")) sawFlatpakConfig = true;
+        if (c.path == (kHome + "/snap/demo/5/.config")) sawSnapConfig = true;
+    }
+    assert(out.size() == 3);
+    assert(sawFlatpakCache && sawSnapRevCache && sawSnapCommonCache);
+    assert(!sawFlatpakNested); // absorbed by its parent cache
+    assert(!sawFlatpakApp && !sawFlatpakData && !sawFlatpakConfig && !sawSnapConfig);
+    std::cout << "  flatpak/snap cache rules OK\n";
+}
+
+// Regression guard: nesting checks used to canonicalize paths per directory
+// (a stat/readlink storm per accepted candidate), which made scans with many
+// directories appear to hang for minutes right before the results appeared.
+// Classification must stay purely in-memory.
+void testRecommendLargeScanCompletesQuickly() {
+    auto engine = makeEngine();
+    ScanResult scan;
+    scan.root = kHome;
+    scan.directories.push_back(mkDir(kHome + "/.cache/thumbnails", 1000, 3));
+    for (int i = 0; i < 50000; ++i) {
+        scan.directories.push_back(
+            mkDir(kHome + "/project/mod" + std::to_string(i % 100) + "/sub" +
+                      std::to_string(i),
+                  4096, 5));
+    }
+
+    const auto t0 = steady_clock::now();
+    auto out = engine.recommend(scan);
+    const auto elapsedMs =
+        duration_cast<milliseconds>(steady_clock::now() - t0).count();
+
+    assert(out.size() == 1);
+    assert(out.front().path == (kHome + "/.cache/thumbnails"));
+    // Generous bound (this runs with asserts on, often unoptimized); the
+    // canonicalization bug took well over 30x this long.
+    assert(elapsedMs < 5000);
+    std::cout << "  large-scan recommend() is fast OK (" << elapsedMs << " ms)\n";
 }
 
 void writeFile(const std::filesystem::path& p, std::size_t bytes) {
@@ -334,7 +523,12 @@ int main() {
     testRootOwnedDowngraded();
     testHardLinkedRecoverableZero();
     testLogFile();
+    testSensitiveLocationFloors();
     testRecommendDeduplicatesNestedDirs();
+    testNestingBoundaryIsComponentWise();
+    testGenericApplicationCacheClassification();
+    testFlatpakAndSnapCaches();
+    testRecommendLargeScanCompletesQuickly();
     testEngineIntegrationEndToEnd();
     std::cout << "All recommendation tests passed!\n";
     return 0;

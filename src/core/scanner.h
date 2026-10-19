@@ -3,6 +3,7 @@
 #include "types.h"
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <vector>
@@ -18,6 +19,13 @@ struct ScanOptions {
     std::size_t maxDepth = 0;            // 0 = unlimited
     std::size_t maxRetainedFiles = 5000; // Top-N largest files kept
     std::vector<std::filesystem::path> excludePaths;
+
+    // G3: bounded pre-count pass. Walks the tree once without metadata to
+    // learn the total directory/file counts, so progress can show a real
+    // percentage and an ETA. Abandoned when the budget is exceeded (or the
+    // pass is disabled), in which case progress falls back to counts-only.
+    bool estimateTotals = true;
+    std::chrono::milliseconds estimateBudget{1500};
 };
 
 struct ScanProgress {
@@ -26,6 +34,12 @@ struct ScanProgress {
     std::uintmax_t bytesSeen = 0;
     int currentDepth = 0;
     std::filesystem::path currentPath;
+
+    // G3: totals from the pre-count pass (0 = unknown/not yet counted).
+    // `counting` is true while that pass is running.
+    std::uintmax_t totalDirs = 0;
+    std::uintmax_t totalFiles = 0;
+    bool counting = false;
 };
 
 // Thread-confined scanner. Call scan() from a worker thread.

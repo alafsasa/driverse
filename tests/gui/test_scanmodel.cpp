@@ -1,4 +1,5 @@
 #include "core/types.h"
+#include "gui/formatting.h"
 #include "gui/scanmodel.h"
 
 #include <QCoreApplication>
@@ -7,6 +8,8 @@
 
 #include <cassert>
 #include <iostream>
+#include <memory>
+#include <string>
 
 using driverse::core::RiskLevel;
 using driverse::gui::ResultsTableModel;
@@ -196,6 +199,41 @@ int main(int argc, char** argv) {
     assert(recs.checkedCount() == 1);
     assert(recs.data(recs.index(0, 0), Qt::CheckStateRole).toInt() == Qt::Checked);
     assert(recs.detailsText(0).contains(QStringLiteral("Justification")));
+
+    // ---- Filter no-op ----
+    // setFilters with unchanged values must not rebuild: scan completion
+    // re-applies the same widget filters right after loading the data, and a
+    // second full rebuild doubled the post-scan UI freeze on large scans.
+    int resets = 0;
+    QObject::connect(&files, &QAbstractItemModel::modelReset,
+                     [&resets]() { ++resets; });
+    files.setFilters(QString(), 0, 0x1F, false); // same as clearFilters() state
+    assert(resets == 0);
+    files.setFilters(QStringLiteral("big"), 0, 0x1F, false);
+    assert(resets == 1);
+    files.setFilters(QString(), 0, 0x1F, false);
+    assert(resets == 2);
+    assert(files.rowCount() == 3);
+
+    // ---- Row cap ----
+    // A directory list larger than the model cap keeps only the top rows
+    // (default sort: largest first) instead of exposing (and sorting) all of
+    // them.
+    auto big = std::make_shared<ScanData>();
+    big->root = QStringLiteral("/big");
+    const std::size_t total = 200000 + 1; // kMaxRows + 1
+    for (std::size_t i = 0; i < total; ++i) {
+        big->result.directories.push_back(
+            makeDir("/big/dir" + std::to_string(i), i, 1));
+    }
+    ResultsTableModel capped(ResultsTableModel::Mode::Directories);
+    capped.setData(big);
+    assert(capped.rowCount() == 200000);
+    // Sizes are 0..200000: only the smallest (0-byte) entry is dropped.
+    assert(capped.data(capped.index(0, 4), Qt::DisplayRole).toString() ==
+           driverse::gui::formatting::bytes(200000));
+    assert(capped.data(capped.index(199999, 4), Qt::DisplayRole).toString() ==
+           driverse::gui::formatting::bytes(1));
 
     std::cout << "All scan model tests passed!\n";
     return 0;

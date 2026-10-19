@@ -68,6 +68,7 @@ QVariant DeviceTableModel::data(const QModelIndex& index, int role) const {
                     QString type = QString::fromStdString(d.fsType);
                     if (d.isNetworkFs) type += QStringLiteral(" (remote)");
                     else if (d.isPseudoFs) type += QStringLiteral(" (virtual)");
+                    else if (d.isRemovable) type += QStringLiteral(" (removable)");
                     return type;
                 }
                 case Total: return formatting::bytes(d.totalBytes);
@@ -97,11 +98,20 @@ QVariant DeviceTableModel::data(const QModelIndex& index, int role) const {
             }
             return {};
 
-        case Qt::ToolTipRole:
-            return QStringLiteral("device: %1\nfs: %2\noptions: %3")
+        case Qt::ToolTipRole: {
+            QString text = QStringLiteral("device: %1\nfs: %2\noptions: %3")
                 .arg(QString::fromStdString(d.device),
                      QString::fromStdString(d.fsType),
                      QString::fromStdString(d.options));
+            if (!d.parentDisk.empty()) {
+                text += QStringLiteral("\ndisk: %1%2%3")
+                    .arg(QString::fromStdString(d.parentDisk),
+                         d.isPartition ? QStringLiteral(" (partition)")
+                                       : QStringLiteral(" (whole disk)"),
+                         d.isRemovable ? QStringLiteral(", removable") : QString());
+            }
+            return text;
+        }
 
         default:
             return {};

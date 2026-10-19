@@ -66,6 +66,39 @@ static void testIsPathUnder() {
     std::cout << "  isPathUnder OK\n";
 }
 
+static void testNormalizedPathHelpers() {
+    // isPathUnderNormalized: component-boundary prefix on normalized strings.
+    assert(utils::isPathUnderNormalized("/a/b/c", "/a/b"));
+    assert(utils::isPathUnderNormalized("/a/b", "/a/b"));   // equal counts
+    assert(utils::isPathUnderNormalized("/a/b", "/"));      // root contains all
+    assert(!utils::isPathUnderNormalized("/a/bc", "/a/b")); // component boundary
+    assert(!utils::isPathUnderNormalized("/a", "/a/b"));    // child shorter
+    assert(!utils::isPathUnderNormalized("/a/b", ""));      // empty parent
+    assert(!utils::isPathUnderNormalized("", "/a"));        // empty child
+
+    // normalizedAbsoluteString: clean absolute paths pass through unchanged...
+    assert(utils::normalizedAbsoluteString("/a/b/c") == "/a/b/c");
+    assert(utils::normalizedAbsoluteString("/") == "/");
+    // ...and anything else falls back to real normalization.
+    assert(utils::normalizedAbsoluteString("/a//b") == "/a/b");
+    assert(utils::normalizedAbsoluteString("/a/./b") == "/a/b");
+    assert(utils::normalizedAbsoluteString("/a/../b") == "/b");
+    assert(utils::normalizedAbsoluteString("/a/b/") == "/a/b");
+    assert(utils::normalizedAbsoluteString("/a/b/.") == "/a/b");
+    // Relative paths resolve against the current directory.
+    const std::string rel = utils::normalizedAbsoluteString("some/rel/path");
+    assert(fs::path(rel).is_absolute());
+    assert(rel.size() > 14);
+    assert(rel.compare(rel.size() - 14, 14, "/some/rel/path") == 0);
+
+    // Trailing slashes must not survive: lexically_normal() keeps them, and
+    // component-boundary comparisons ("/a/b/" vs "/a/b/child") depend on
+    // there being none. Root keeps its single slash.
+    assert(utils::normalizedAbsoluteString("/a/b///") == "/a/b");
+    assert(utils::normalizedAbsoluteString("//") == "/");
+    std::cout << "  normalized path helpers OK\n";
+}
+
 static void testCanonicalizeNoFollow() {
     namespace fs = std::filesystem;
     const fs::path base = fs::temp_directory_path() /
@@ -136,6 +169,7 @@ int main() {
     testFsTypes();
     testEnums();
     testIsPathUnder();
+    testNormalizedPathHelpers();
     testCanonicalizeNoFollow();
     testErrnoAndAbbreviate();
     std::cout << "All utils tests passed!\n";

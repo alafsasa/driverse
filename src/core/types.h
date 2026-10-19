@@ -98,6 +98,11 @@ struct DeviceInfo {
     bool isNetworkFs = false;            // nfs/smb etc
     bool isReadOnly = false;
     std::uintmax_t deviceId = 0;         // st_dev
+
+    // Backing block device classification (G2), resolved via sysfs.
+    std::string parentDisk;              // top-level disk ("sda"); "" if unknown
+    bool isPartition = false;            // partition of `parentDisk`
+    bool isRemovable = false;            // removable media (USB stick etc)
 };
 
 // Cleanup candidate
