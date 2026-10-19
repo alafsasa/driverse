@@ -153,4 +153,4 @@ cd build && cpack
 
 ## License
 
-To be determined (all rights reserved until a license is chosen).
+GNU General Public License v3.0 — see [`LICENSE`](LICENSE) for the full text.
